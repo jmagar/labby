@@ -1,0 +1,18 @@
+{
+  "service": "dev_containers",
+  "api_path": "/v1/dev-containers",
+  "cli_probe": null,
+  "can_mutate": true,
+  "success_action": "dev_containers.list",
+  "invalid_action": "schema",
+  "policy_action": "dev_containers.destroy",
+  "workflow": ["dev_containers.create", "dev_containers.start", "dev_containers.stop", "dev_containers.destroy"],
+  "parameters": {
+    "action": "dev_containers.list",
+    "instance_id": "matrix-container",
+    "owner_id": "bootstrap-owner",
+    "owner_kind": "personal",
+    "template_id": "matrix-template"
+  },
+  "action_params": {}
+}

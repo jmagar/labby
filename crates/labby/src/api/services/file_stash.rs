@@ -1021,6 +1021,10 @@ mod tests {
             )
             .await,
         );
+        assert_eq!(
+            runtime.wait_for_recovery().await,
+            crate::file_stash::FileStashStatus::Ready
+        );
         let service = FileStashService::new(
             Arc::clone(&runtime),
             Arc::new(crate::access::AccessRuntime::blocked_unavailable()),
@@ -1087,6 +1091,10 @@ mod tests {
             .unwrap();
         let stash =
             Arc::new(crate::file_stash::FileStashRuntime::initialize(root.join("stash")).await);
+        assert_eq!(
+            stash.wait_for_recovery().await,
+            crate::file_stash::FileStashStatus::Ready
+        );
         let state = AppState::new()
             .with_access_runtime(Arc::clone(&access))
             .with_file_stash_runtime(Arc::clone(&stash));
@@ -1094,7 +1102,7 @@ mod tests {
         let auth = AuthContext {
             sub: "owner".into(),
             issuer: "https://accounts.google.com".into(),
-            scopes: Vec::new(),
+            scopes: vec!["lab".into()],
             actor_key: None,
             email: None,
             via_session: false,

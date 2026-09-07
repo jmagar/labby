@@ -71,10 +71,23 @@ impl TaskStore {
             .map_err(super::store::map_sqlite_error)
     }
 
-    pub(crate) fn list(&self) -> AccessStoreResult<Vec<TaskRecord>> {
-        let mut statement = self.connection.prepare("SELECT task_id,idempotency_key,owner_kind,owner_id,project_id,creator_principal_id,agent_id,agent_version,agent_revision_digest,input_digest,catalog_generation,authority_fingerprint,state,attempt,output_digest,error_code FROM agent_tasks ORDER BY owner_kind,owner_id,created_at,task_id").map_err(super::store::map_sqlite_error)?;
+    pub(crate) fn list_page(
+        &self,
+        after: &str,
+        limit: usize,
+    ) -> AccessStoreResult<Vec<TaskRecord>> {
+        if limit == 0 || limit > 100 {
+            return Err(AccessStoreError::MalformedVocabulary);
+        }
+        let mut statement = self.connection.prepare("SELECT task_id,idempotency_key,owner_kind,owner_id,project_id,creator_principal_id,agent_id,agent_version,agent_revision_digest,input_digest,catalog_generation,authority_fingerprint,state,attempt,output_digest,error_code FROM agent_tasks WHERE task_id>?1 ORDER BY task_id LIMIT ?2").map_err(super::store::map_sqlite_error)?;
         statement
-            .query_map([], decode)
+            .query_map(
+                params![
+                    after,
+                    i64::try_from(limit).map_err(|_| AccessStoreError::MalformedVocabulary)?
+                ],
+                decode,
+            )
             .map_err(super::store::map_sqlite_error)?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(super::store::map_sqlite_error)
@@ -176,7 +189,7 @@ impl TaskStore {
     }
 }
 
-fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
+pub(super) fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
     use labby_primitives::access::{InstallationId, PrincipalId, ProjectId, TeamId};
     let owner_id: String = row.get(3)?;
     let owner = match row.get::<_, String>(2)?.as_str() {
@@ -269,7 +282,7 @@ mod tests {
         assert_eq!(s.create(&intent(), 1).unwrap(), "task-1");
         assert_eq!(s.create(&intent(), 2).unwrap(), "task-1");
         assert_eq!(s.get("task-1").unwrap().unwrap().state, TaskState::Created);
-        assert_eq!(s.list().unwrap().len(), 1);
+        assert_eq!(s.list_page("", 100).unwrap().len(), 1);
         s.transition(
             "task-1",
             TaskState::Created,

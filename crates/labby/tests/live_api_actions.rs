@@ -25,6 +25,9 @@ async fn post_action(
         .post(format!("{base}{path}"))
         .header("content-type", "application/json")
         .json(&serde_json::json!({"action": action, "params": params}));
+    if action.starts_with("gateway.loadout.") || action.starts_with("gateway.protected_route.") {
+        request = request.header("x-labby-team-id", "bootstrap-initial-team");
+    }
     if authorized {
         request = request.bearer_auth(SECRET_CANARY);
     }
@@ -113,6 +116,217 @@ async fn ensure_action_fixture(
     }
 }
 
+fn seed_authority_fixtures(root: &std::path::Path) {
+    use sha2::Digest as _;
+
+    let connection = rusqlite::Connection::open(root.join("labby-home/access.db")).unwrap();
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO principals(principal_id,organization_id,kind,status,display_name,created_at,updated_at) VALUES(?1,'bootstrap-local','user','active',NULL,1,1)",
+            ["matrix-principal"],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO dev_container_templates(template_id,image_digest,max_active_instances,cpu_millis,memory_bytes,disk_bytes,max_lifetime_seconds,host_capabilities_json,status,policy_epoch,created_at,updated_at) VALUES('matrix-template','sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',32,1000,1073741824,1073741824,3600,'[]','approved',1,1,1)",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO dev_container_owner_quotas(owner_kind,owner_id,max_active_instances,policy_epoch,updated_at) VALUES('personal','bootstrap-owner',32,1,1)",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO groups(group_id,organization_id,kind,name,status,policy_epoch,membership_epoch,created_by,created_at,updated_at,deleted_at) VALUES('matrix-invite-team','bootstrap-local','team','Matrix Invite Team','active',1,1,'matrix-principal',1,1,NULL)",
+            [],
+        )
+        .unwrap();
+    let invitation_digest = sha2::Sha256::digest([0xaa; 32]);
+    connection
+        .execute(
+            "INSERT OR IGNORE INTO team_invitations(invitation_digest,organization_id,team_id,role,invited_principal_id,inviter_principal_id,team_membership_epoch,status,accepted_principal_id,created_at,expires_at,accepted_at,revoked_at,updated_at) VALUES(?1,'bootstrap-local','matrix-invite-team','member','bootstrap-owner','matrix-principal',1,'pending',NULL,1,4102444800,NULL,NULL,1)",
+            [invitation_digest.as_slice()],
+        )
+        .unwrap();
+}
+
+async fn prepare_authority_action(
+    client: &reqwest::Client,
+    base: &str,
+    root: &std::path::Path,
+    intent: &action_matrix::CaseIntent,
+    mut params: serde_json::Value,
+) -> serde_json::Value {
+    let action_id = intent.action.replace('.', "-");
+    if intent.service == "access" {
+        if intent.action == "access.team_invitation.create" {
+            params["token"] = serde_json::Value::String("b".repeat(64));
+        }
+        if let Some(team_id) = params.get_mut("team_id") {
+            *team_id = serde_json::Value::String(format!("matrix-{action_id}"));
+        }
+        let team_id = params.get("team_id").and_then(serde_json::Value::as_str);
+        if let Some(team_id) = team_id
+            && intent.action != "access.team.create"
+        {
+            drop(
+                post_action(
+                    client,
+                    base,
+                    "/v1/access/admin",
+                    "access.team.create",
+                    serde_json::json!({"team_id":team_id,"name":format!("Matrix {action_id}")}),
+                    true,
+                )
+                .await,
+            );
+        }
+        if matches!(
+            intent.action.as_str(),
+            "access.team.member.role.set"
+                | "access.team.member.suspend"
+                | "access.team.member.remove"
+        ) {
+            drop(post_action(client, base, "/v1/access/admin", "access.team.member.add", serde_json::json!({"team_id":team_id.unwrap(),"principal_id":"matrix-principal","role":"member"}), true).await);
+        }
+        if intent.action == "access.team.activate" {
+            drop(
+                post_action(
+                    client,
+                    base,
+                    "/v1/access/admin",
+                    "access.team.suspend",
+                    serde_json::json!({"team_id":team_id.unwrap()}),
+                    true,
+                )
+                .await,
+            );
+        }
+        if intent.action == "access.gateway_credential.revoke" {
+            drop(post_action(client, base, "/v1/access/admin", "access.gateway_credential.bind", serde_json::json!({"team_id":team_id.unwrap(),"upstream_name":"matrix-upstream","binding_id":format!("binding-{action_id}")}), true).await);
+        }
+    } else if intent.service == "agents" {
+        let agent_id = format!("matrix-{action_id}");
+        params["agent_id"] = serde_json::Value::String(agent_id.clone());
+        if intent.action != "agents.create" {
+            let fixture = &action_scenarios::fixtures()["agents"];
+            let mut create = serde_json::Map::new();
+            for name in [
+                "owner_kind",
+                "owner_id",
+                "content_digest",
+                "repository_digest",
+                "image_digest",
+                "harness_digest",
+                "loadout_digest",
+                "catalog_generation",
+            ] {
+                create.insert(name.to_owned(), fixture.parameters[name].clone());
+            }
+            create.insert("agent_id".into(), agent_id.into());
+            drop(
+                post_action(
+                    client,
+                    base,
+                    "/v1/agents",
+                    "agents.create",
+                    serde_json::Value::Object(create),
+                    true,
+                )
+                .await,
+            );
+        }
+        if intent.action == "agents.session.status" {
+            let (_, body) = post_action(
+                client,
+                base,
+                "/v1/agents",
+                "agents.run",
+                serde_json::json!({"agent_id":params["agent_id"]}),
+                true,
+            )
+            .await;
+            let response: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            params["session_id"] = response["session_id"].clone();
+        }
+    } else if intent.service == "dev_containers" {
+        let instance_id = format!("matrix-{action_id}");
+        params["instance_id"] = serde_json::Value::String(instance_id.clone());
+        if intent.action != "dev_containers.create" {
+            let (status, body) = post_action(client, base, "/v1/dev-containers", "dev_containers.create", serde_json::json!({"instance_id":instance_id,"template_id":"matrix-template","owner_kind":"personal","owner_id":"bootstrap-owner"}), true).await;
+            assert!(
+                status.is_success(),
+                "{} create prerequisite failed: {}",
+                intent.key(),
+                String::from_utf8_lossy(&body)
+            );
+        }
+        if matches!(
+            intent.action.as_str(),
+            "dev_containers.start" | "dev_containers.stop"
+        ) {
+            let state = if intent.action == "dev_containers.start" {
+                "stopped"
+            } else {
+                "running"
+            };
+            let connection = rusqlite::Connection::open(root.join("labby-home/access.db")).unwrap();
+            connection.execute("UPDATE dev_container_instances SET desired_state=?1,observed_state=?1 WHERE instance_id=?2", rusqlite::params![state, params["instance_id"].as_str().unwrap()]).unwrap();
+        }
+    } else if intent.service == "tasks" {
+        let task_id = format!("matrix-{action_id}");
+        let agent_id = format!("matrix-agent-{action_id}");
+        params["task_id"] = serde_json::Value::String(task_id.clone());
+        params["agent_id"] = serde_json::Value::String(agent_id.clone());
+        let agents = &action_scenarios::fixtures()["agents"];
+        let mut create_agent = serde_json::Map::new();
+        for name in [
+            "owner_kind",
+            "owner_id",
+            "content_digest",
+            "repository_digest",
+            "image_digest",
+            "harness_digest",
+            "loadout_digest",
+            "catalog_generation",
+        ] {
+            create_agent.insert(name.to_owned(), agents.parameters[name].clone());
+        }
+        create_agent.insert("agent_id".into(), agent_id.into());
+        drop(
+            post_action(
+                client,
+                base,
+                "/v1/agents",
+                "agents.create",
+                serde_json::Value::Object(create_agent),
+                true,
+            )
+            .await,
+        );
+        if intent.action != "tasks.create" {
+            drop(post_action(client, base, "/v1/tasks", "tasks.create", serde_json::json!({"task_id":task_id,"idempotency_key":format!("idem-{action_id}"),"owner_kind":"personal","owner_id":"bootstrap-owner","agent_id":params["agent_id"],"input_digest":"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}), true).await);
+        }
+        if intent.action == "tasks.result" {
+            drop(
+                post_action(
+                    client,
+                    base,
+                    "/v1/tasks",
+                    "tasks.queue",
+                    serde_json::json!({"task_id":params["task_id"]}),
+                    true,
+                )
+                .await,
+            );
+        }
+    }
+    params
+}
+
 #[test]
 fn every_api_classification_has_exactly_one_execution_or_contract_plan() {
     let plans = action_scenarios::exact_plans(Surface::Api);
@@ -136,18 +350,41 @@ async fn every_api_action_reaches_live_http_or_proves_auth_denial() {
         std::fs::write(workspace.join("fixture.txt"), b"owned fixture\n").unwrap();
         let guard = live_labby::LiveLabbyBuilder::new()
             .env("LABBY_MCP_HTTP_TOKEN", SECRET_CANARY)
+            .env("LABBY_E2E_BOOTSTRAP_STATIC_OWNER", "1")
+            .env("LABBY_E2E_TEAM_ID", "bootstrap-initial-team")
+            .env("LABBY_E2E_DETERMINISTIC_EXECUTORS", "1")
             .existing_root(owned_root.path())
             .config(format!("[workspace]\nroot = {:?}\n", workspace))
             .start()
             .await
             .expect("live API daemon");
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        seed_authority_fixtures(guard.root());
         let fixtures = action_scenarios::fixtures();
         let mut successes = BTreeSet::new();
         let mut structured_errors = BTreeSet::new();
         let mut destructive_denials = BTreeSet::new();
         let mut observed = BTreeMap::new();
         let mut outcomes = BTreeMap::new();
+        for (service, path, action) in [
+            ("access", "/v1/access/admin", "access.team.list"),
+            ("agents", "/v1/agents", "agents.list"),
+            ("tasks", "/v1/tasks", "tasks.list"),
+        ] {
+            let (status, body) = post_action(
+                &client,
+                &guard.connection().base_url,
+                path,
+                action,
+                serde_json::json!({}),
+                false,
+            )
+            .await;
+            assert_eq!(status, reqwest::StatusCode::UNAUTHORIZED);
+            let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert!(value.get("kind").is_some() || value["error"].get("kind").is_some());
+            structured_errors.insert(service.to_owned());
+        }
         let expected_api_actions = action_matrix::compiled_intents()
             .filter(|intent| intent.applicable_surfaces.contains(&Surface::Api))
             .count();
@@ -179,7 +416,14 @@ async fn every_api_action_reaches_live_http_or_proves_auth_denial() {
                 let status = response.status();
                 (status, response.bytes().await.unwrap())
             } else {
-                let params = action_scenarios::fixture_params(intent);
+                let params = prepare_authority_action(
+                    &client,
+                    &guard.connection().base_url,
+                    guard.root(),
+                    intent,
+                    action_scenarios::fixture_params(intent),
+                )
+                .await;
                 if destructive {
                     let (denied_status, denied_body) = post_action(
                         &client,
@@ -337,7 +581,7 @@ async fn every_api_action_reaches_live_http_or_proves_auth_denial() {
             .filter(|intent| intent.applicable_surfaces.contains(&Surface::Api))
             .filter(|intent| {
                 let outcome = &outcomes[&intent.key()];
-                !outcome.satisfies(intent)
+                !outcome.satisfies_surface(intent, Surface::Api)
                     && !(action_scenarios::dedicated_contract_reason_for(
                         &intent.key(),
                         Surface::Api,
@@ -399,8 +643,12 @@ async fn every_api_action_reaches_live_http_or_proves_auth_denial() {
             structured_errors, api_services,
             "every API service needs an invalid/error path"
         );
-        let required_destructive_denials =
-            BTreeSet::from(["gateway".into(), "setup".into(), "snippets".into()]);
+        let required_destructive_denials = BTreeSet::from([
+            "dev_containers".into(),
+            "gateway".into(),
+            "setup".into(),
+            "snippets".into(),
+        ]);
         assert!(
             required_destructive_denials.is_subset(&destructive_denials),
             "mounted destructive services must deny unauthenticated dispatch"

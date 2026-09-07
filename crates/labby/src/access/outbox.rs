@@ -1,10 +1,14 @@
 use rusqlite::{Connection, TransactionBehavior, params};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::io::{BufWriter, Write as _};
 
 use super::error::{AccessStoreError, AccessStoreResult};
 use super::store::map_sqlite_error;
 
 pub(crate) const OUTBOX_BATCH_LIMIT: usize = 256;
+const SNAPSHOT_SPOOL_MAX_RECORDS: usize = 1_000_000;
+const SNAPSHOT_SPOOL_MAX_BYTES: usize = 256 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PendingProjection {
@@ -14,17 +18,18 @@ pub(crate) struct PendingProjection {
     pub(crate) previous_digest: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub(crate) struct AuthoritySnapshotRecord {
     pub(crate) resource_type: String,
     pub(crate) resource_id: String,
     pub(crate) value: Value,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) struct AuthoritySnapshotCheckpoint {
-    pub(crate) records: Vec<AuthoritySnapshotRecord>,
-    /// Last local mutation included in the same SQLite view as `records`.
+    pub(crate) spool: tempfile::NamedTempFile,
+    pub(crate) record_count: usize,
+    /// Last local mutation included in the same SQLite view as the spool.
     pub(crate) outbox_cutoff: Option<u64>,
 }
 
@@ -33,6 +38,18 @@ pub(super) fn snapshot(
     organization_id: &str,
 ) -> AccessStoreResult<Vec<AuthoritySnapshotRecord>> {
     let mut records = Vec::new();
+    snapshot_into(connection, organization_id, |record| {
+        records.push(record);
+        Ok(())
+    })?;
+    Ok(records)
+}
+
+fn snapshot_into(
+    connection: &Connection,
+    organization_id: &str,
+    mut emit: impl FnMut(AuthoritySnapshotRecord) -> AccessStoreResult<()>,
+) -> AccessStoreResult<()> {
     let (organization_status, policy_epoch, authority_schema, global_revision) = connection
         .query_row(
             "SELECT o.status,o.policy_epoch,m.schema_version,m.global_revision FROM organizations o JOIN access_metadata m ON m.singleton=1 WHERE o.organization_id=?1",
@@ -40,11 +57,11 @@ pub(super) fn snapshot(
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?)),
         )
         .map_err(map_sqlite_error)?;
-    records.push(AuthoritySnapshotRecord {
+    emit(AuthoritySnapshotRecord {
         resource_type: "organization".into(),
         resource_id: organization_id.to_owned(),
         value: json!({"status":organization_status,"policy_epoch":policy_epoch,"authority_schema":authority_schema,"global_revision":global_revision}),
-    });
+    })?;
     let mut principals = connection
         .prepare("SELECT principal_id,status FROM principals WHERE organization_id=?1 ORDER BY principal_id COLLATE BINARY")
         .map_err(map_sqlite_error)?;
@@ -55,11 +72,11 @@ pub(super) fn snapshot(
         .map_err(map_sqlite_error)?
     {
         let (principal_id, status) = row.map_err(map_sqlite_error)?;
-        records.push(AuthoritySnapshotRecord {
+        emit(AuthoritySnapshotRecord {
             resource_type: "principal".into(),
             resource_id: principal_id,
             value: json!({"status":status}),
-        });
+        })?;
     }
     drop(principals);
     let mut administrators = connection
@@ -78,11 +95,11 @@ pub(super) fn snapshot(
     {
         let (principal_id, principal_status, status, authority_epoch) =
             row.map_err(map_sqlite_error)?;
-        records.push(AuthoritySnapshotRecord {
+        emit(AuthoritySnapshotRecord {
             resource_type: "platform_administrator".into(),
             resource_id: principal_id,
             value: json!({"principal_status":principal_status,"status":status,"authority_epoch":authority_epoch}),
-        });
+        })?;
     }
     drop(administrators);
     let mut projects = connection
@@ -99,11 +116,11 @@ pub(super) fn snapshot(
         .map_err(map_sqlite_error)?
     {
         let (project_id, status, policy_epoch) = row.map_err(map_sqlite_error)?;
-        records.push(AuthoritySnapshotRecord {
+        emit(AuthoritySnapshotRecord {
             resource_type: "project".into(),
             resource_id: project_id,
             value: json!({"status":status,"policy_epoch":policy_epoch}),
-        });
+        })?;
     }
     drop(projects);
     let mut project_memberships = connection
@@ -123,11 +140,11 @@ pub(super) fn snapshot(
     {
         let (project_id, principal_id, role, status, membership_epoch) =
             row.map_err(map_sqlite_error)?;
-        records.push(AuthoritySnapshotRecord {
+        emit(AuthoritySnapshotRecord {
             resource_type: "project_membership".into(),
             resource_id: format!("{project_id}\u{0}{principal_id}"),
             value: json!({"status":status,"project_id":project_id,"principal_id":principal_id,"role":role,"membership_epoch":membership_epoch}),
-        });
+        })?;
     }
     drop(project_memberships);
     let mut teams = connection
@@ -145,11 +162,11 @@ pub(super) fn snapshot(
         .map_err(map_sqlite_error)?
     {
         let (team_id, status, policy_epoch, membership_epoch) = row.map_err(map_sqlite_error)?;
-        records.push(AuthoritySnapshotRecord {
+        emit(AuthoritySnapshotRecord {
             resource_type: "team".into(),
             resource_id: team_id,
             value: json!({"status":status,"policy_epoch":policy_epoch,"membership_epoch":membership_epoch}),
-        });
+        })?;
     }
     drop(teams);
 
@@ -170,11 +187,11 @@ pub(super) fn snapshot(
     {
         let (team_id, principal_id, role, status, membership_epoch) =
             row.map_err(map_sqlite_error)?;
-        records.push(AuthoritySnapshotRecord {
+        emit(AuthoritySnapshotRecord {
             resource_type: "team_membership".into(),
             resource_id: format!("{team_id}\u{0}{principal_id}"),
             value: json!({"team_id":team_id,"principal_id":principal_id,"role":role,"status":status,"membership_epoch":membership_epoch}),
-        });
+        })?;
     }
     drop(memberships);
 
@@ -195,23 +212,79 @@ pub(super) fn snapshot(
     {
         let (team_id, project_id, role, status, assignment_epoch) =
             row.map_err(map_sqlite_error)?;
-        records.push(AuthoritySnapshotRecord {
+        emit(AuthoritySnapshotRecord {
             resource_type: "team_project".into(),
             resource_id: format!("{team_id}\u{0}{project_id}"),
             value: json!({"team_id":team_id,"project_id":project_id,"role":role,"status":status,"assignment_epoch":assignment_epoch}),
-        });
+        })?;
     }
-    Ok(records)
+    Ok(())
+}
+
+fn write_spooled_record(
+    writer: &mut impl std::io::Write,
+    record: &AuthoritySnapshotRecord,
+    record_count: &mut usize,
+    byte_count: &mut usize,
+    max_records: usize,
+    max_bytes: usize,
+) -> AccessStoreResult<()> {
+    if *record_count >= max_records {
+        return Err(AccessStoreError::Unavailable(
+            "authority snapshot exceeds record spool limit".into(),
+        ));
+    }
+    let encoded = serde_json::to_vec(record)
+        .map_err(|error| AccessStoreError::Unavailable(error.to_string()))?;
+    let next_bytes = byte_count.checked_add(encoded.len() + 1).ok_or_else(|| {
+        AccessStoreError::Unavailable("authority snapshot spool size overflow".into())
+    })?;
+    if next_bytes > max_bytes {
+        return Err(AccessStoreError::Unavailable(
+            "authority snapshot exceeds byte spool limit".into(),
+        ));
+    }
+    writer
+        .write_all(&encoded)
+        .and_then(|()| writer.write_all(b"\n"))
+        .map_err(|error| AccessStoreError::Unavailable(error.to_string()))?;
+    *record_count += 1;
+    *byte_count = next_bytes;
+    Ok(())
 }
 
 pub(super) fn snapshot_checkpoint(
     connection: &mut Connection,
     organization_id: &str,
 ) -> AccessStoreResult<AuthoritySnapshotCheckpoint> {
+    // A deferred read transaction gives the snapshot and cutoff one coherent
+    // SQLite view without reserving the writer for the potentially large
+    // snapshot materialization.
     let tx = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .transaction_with_behavior(TransactionBehavior::Deferred)
         .map_err(map_sqlite_error)?;
-    let records = snapshot(&tx, organization_id)?;
+    let spool = tempfile::NamedTempFile::new()
+        .map_err(|error| AccessStoreError::Unavailable(error.to_string()))?;
+    let mut writer = BufWriter::new(
+        spool
+            .reopen()
+            .map_err(|error| AccessStoreError::Unavailable(error.to_string()))?,
+    );
+    let mut record_count = 0usize;
+    let mut byte_count = 0usize;
+    snapshot_into(&tx, organization_id, |record| {
+        write_spooled_record(
+            &mut writer,
+            &record,
+            &mut record_count,
+            &mut byte_count,
+            SNAPSHOT_SPOOL_MAX_RECORDS,
+            SNAPSHOT_SPOOL_MAX_BYTES,
+        )
+    })?;
+    writer
+        .flush()
+        .map_err(|error| AccessStoreError::Unavailable(error.to_string()))?;
     let cutoff = tx
         .query_row(
             "SELECT MAX(sequence) FROM authority_projection_outbox WHERE organization_id=?1",
@@ -223,7 +296,8 @@ pub(super) fn snapshot_checkpoint(
         .transpose()?;
     tx.commit().map_err(map_sqlite_error)?;
     Ok(AuthoritySnapshotCheckpoint {
-        records,
+        spool,
+        record_count,
         outbox_cutoff: cutoff,
     })
 }
@@ -334,7 +408,33 @@ pub(super) fn supersede_with_snapshot(
 mod tests {
     use labby_auth::{Authenticator, VerifiedIdentity};
 
+    use super::{AuthoritySnapshotRecord, write_spooled_record};
     use crate::access::{AccessStore, BootstrapOwnerInput};
+
+    #[test]
+    fn snapshot_spool_limits_fail_closed_before_writing_past_the_ceiling() {
+        let record = AuthoritySnapshotRecord {
+            resource_type: "principal".into(),
+            resource_id: "principal-1".into(),
+            value: serde_json::json!({"status":"active"}),
+        };
+        let mut output = Vec::new();
+        let mut records = 0;
+        let mut bytes = 0;
+        write_spooled_record(&mut output, &record, &mut records, &mut bytes, 1, 1024).unwrap();
+        assert!(
+            write_spooled_record(&mut output, &record, &mut records, &mut bytes, 1, 1024).is_err()
+        );
+        assert_eq!(records, 1);
+
+        let mut output = Vec::new();
+        let mut records = 0;
+        let mut bytes = 0;
+        assert!(
+            write_spooled_record(&mut output, &record, &mut records, &mut bytes, 10, 1).is_err()
+        );
+        assert!(output.is_empty());
+    }
 
     #[tokio::test]
     async fn snapshot_uses_typed_collision_safe_team_records() {

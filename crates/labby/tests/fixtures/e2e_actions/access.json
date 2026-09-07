@@ -1,0 +1,27 @@
+{
+  "service": "access",
+  "api_path": "/v1/access/admin",
+  "cli_probe": null,
+  "can_mutate": true,
+  "success_action": "access.team.list",
+  "invalid_action": "schema",
+  "policy_action": "access.platform_admin.grant",
+  "workflow": ["access.team.create", "access.team.suspend", "access.team.activate"],
+  "parameters": {
+    "action": "access.team.list",
+    "binding_id": "matrix-binding",
+    "invitation_code": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "name": "Matrix Team",
+    "principal_id": "matrix-principal",
+    "project_id": "bootstrap-default",
+    "role": "member",
+    "team_id": "matrix-team",
+    "ttl_seconds": 300,
+    "upstream_name": "matrix-upstream"
+  },
+  "action_params": {
+    "access.team.member.role.set": {
+      "role": "admin"
+    }
+  }
+}

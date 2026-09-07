@@ -5,8 +5,10 @@
 )]
 
 use std::collections::BTreeMap;
+use std::io::{BufRead as _, BufReader};
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use ed25519_dalek::{Signer as _, SigningKey};
@@ -23,6 +25,113 @@ use sha2::{Digest as _, Sha256};
 use crate::access::AccessStore;
 
 const SEND_TIMEOUT: Duration = Duration::from_secs(15);
+
+#[derive(Clone, Debug, Default)]
+struct ProjectionHealth {
+    managed: bool,
+    ready: bool,
+    pending: Option<String>,
+    last_success: Option<Instant>,
+    lag: usize,
+    gap: bool,
+    key_generation: Option<String>,
+    watermark: Option<u64>,
+}
+
+#[cfg_attr(feature = "api-docs", derive(utoipa::ToSchema))]
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ManagedProjectionReadiness {
+    pub managed: bool,
+    pub ready: bool,
+    pub stale: bool,
+    pub lag: usize,
+    pub gap: bool,
+    pub watermark: Option<u64>,
+    pub key_generation: Option<String>,
+    pub pending: Option<String>,
+}
+
+fn projection_health() -> &'static Mutex<ProjectionHealth> {
+    static HEALTH: OnceLock<Mutex<ProjectionHealth>> = OnceLock::new();
+    HEALTH.get_or_init(|| Mutex::new(ProjectionHealth::default()))
+}
+
+fn set_projection_health(managed: bool, ready: bool, pending: Option<&str>) {
+    if let Ok(mut health) = projection_health().lock() {
+        *health = ProjectionHealth {
+            managed,
+            ready,
+            pending: pending.map(str::to_owned),
+            last_success: ready.then(Instant::now),
+            lag: usize::from(!ready),
+            gap: false,
+            key_generation: None,
+            watermark: None,
+        };
+    }
+}
+
+pub(crate) fn projection_readiness() -> Option<ManagedProjectionReadiness> {
+    projection_health().lock().ok().and_then(|health| {
+        health.managed.then(|| {
+            let stale = health
+                .last_success
+                .is_some_and(|success| success.elapsed() > Duration::from_secs(15));
+            ManagedProjectionReadiness {
+                managed: true,
+                ready: health.ready && !stale && health.lag == 0 && !health.gap,
+                stale,
+                lag: health.lag,
+                gap: health.gap,
+                watermark: health.watermark,
+                key_generation: health.key_generation.clone(),
+                pending: health.pending.clone(),
+            }
+        })
+    })
+}
+
+fn record_projection_ack(ack: &AuthorityProjectionAck) {
+    if let Ok(mut health) = projection_health().lock() {
+        health.watermark = Some(
+            health
+                .watermark
+                .map_or(ack.highest_contiguous_sequence, |current| {
+                    current.max(ack.highest_contiguous_sequence)
+                }),
+        );
+    }
+}
+
+/// Returns a non-sensitive readiness reason while managed authority is stale.
+pub(crate) fn managed_projection_readiness_pending() -> Option<String> {
+    projection_health().lock().ok().and_then(|health| {
+        let stale = health
+            .last_success
+            .is_some_and(|success| success.elapsed() > Duration::from_secs(15));
+        (health.managed && (!health.ready || stale || health.lag > 0 || health.gap)).then(|| {
+            health
+                .pending
+                .clone()
+                .unwrap_or_else(|| "Depot authority projection is not ready".to_owned())
+        })
+    })
+}
+
+fn mark_projection_ready(key_id: &str) {
+    if let Ok(mut health) = projection_health().lock() {
+        health.managed = true;
+        health.ready = true;
+        health.pending = None;
+        health.last_success = Some(Instant::now());
+        health.lag = 0;
+        health.gap = false;
+        health.key_generation = Some(format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(key_id.as_bytes()))
+        ));
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ProjectionSendError {
@@ -113,7 +222,7 @@ impl AuthorityProjectionSender {
             .json()
             .await
             .map_err(|_| ProjectionSendError::InvalidResponse)?;
-        if !readiness.ready {
+        if !readiness.accepting.unwrap_or(readiness.ready) {
             return Err(ProjectionSendError::Rejected);
         }
         Ok(readiness)
@@ -128,7 +237,8 @@ impl AuthorityProjectionSender {
         records: Vec<AuthorityProjectionRecord>,
         now: i64,
     ) -> Result<AuthorityProjectionAck, ProjectionSendError> {
-        self.send_snapshot_chunk(organization_id, records, now, true)
+        let snapshot_id = snapshot_id(organization_id, now);
+        self.send_snapshot_chunk(organization_id, records, now, true, &snapshot_id, true)
             .await
     }
 
@@ -138,6 +248,8 @@ impl AuthorityProjectionSender {
         mut records: Vec<AuthorityProjectionRecord>,
         now: i64,
         replace: bool,
+        snapshot_id: &str,
+        snapshot_complete: bool,
     ) -> Result<AuthorityProjectionAck, ProjectionSendError> {
         if records.is_empty() || records.len() > MAX_AUTHORITY_RECORDS_PER_BATCH {
             return Err(ProjectionSendError::Configuration);
@@ -155,13 +267,11 @@ impl AuthorityProjectionSender {
         let envelope = sign_envelope(
             self.installation_id.as_ref(),
             organization_id,
-            if replace {
-                ProjectionKind::Snapshot
-            } else {
-                ProjectionKind::Delta
-            },
+            ProjectionKind::Snapshot,
             replace.then_some(base),
-            now.to_string(),
+            Some(snapshot_id),
+            Some(snapshot_complete),
+            rfc3339_timestamp(now)?,
             watermark.and_then(|value| value.last_envelope_digest.clone()),
             self.key_id.as_ref(),
             records,
@@ -214,28 +324,43 @@ impl AuthorityProjectionSender {
             .authority_snapshot_checkpoint(organization_id.to_owned())
             .await
             .map_err(|_| ProjectionSendError::Store)?;
-        let records = checkpoint
-            .records
-            .into_iter()
-            .map(|record| AuthorityProjectionRecord {
-                sequence: 0,
-                resource_type: record.resource_type,
-                resource_id: record.resource_id,
-                operation: "upsert".into(),
-                value: Some(record.value),
-            })
-            .collect::<Vec<_>>();
-        let mut chunks = records.chunks(MAX_AUTHORITY_RECORDS_PER_BATCH);
-        let first = chunks.next().ok_or(ProjectionSendError::Configuration)?;
-        let mut ack = self
-            .send_snapshot_chunk(organization_id, first.to_vec(), now, true)
-            .await?;
-        for chunk in chunks {
-            ack = self
-                .send_snapshot_chunk(organization_id, chunk.to_vec(), now, false)
-                .await?;
+        if checkpoint.record_count == 0 {
+            return Err(ProjectionSendError::Configuration);
         }
-        Ok((ack, checkpoint.outbox_cutoff))
+        let file = checkpoint
+            .spool
+            .reopen()
+            .map_err(|_| ProjectionSendError::Store)?;
+        let mut lines = BufReader::new(file).lines();
+        let snapshot_id = snapshot_id(organization_id, now);
+        let chunk_count = checkpoint
+            .record_count
+            .div_ceil(MAX_AUTHORITY_RECORDS_PER_BATCH);
+        let mut ack = None;
+        for index in 0..chunk_count {
+            let chunk = read_spooled_chunk(&mut lines)?;
+            if chunk.is_empty() {
+                return Err(ProjectionSendError::Store);
+            }
+            ack = self
+                .send_snapshot_chunk(
+                    organization_id,
+                    chunk,
+                    now,
+                    index == 0,
+                    &snapshot_id,
+                    index + 1 == chunk_count,
+                )
+                .await?
+                .into();
+        }
+        if lines.next().is_some() {
+            return Err(ProjectionSendError::Store);
+        }
+        Ok((
+            ack.ok_or(ProjectionSendError::Store)?,
+            checkpoint.outbox_cutoff,
+        ))
     }
 
     /// Performs at most one bounded delivery pass. It is intended for a supervised
@@ -351,11 +476,13 @@ impl AuthorityProjectionSender {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let previous_digest = rows.first().and_then(|row| row.previous_digest.clone());
-        let generated_at = now.to_string();
+        let generated_at = rfc3339_timestamp(now)?;
         let envelope = sign_envelope(
             self.installation_id.as_ref(),
             organization_id,
             ProjectionKind::Delta,
+            None,
+            None,
             None,
             generated_at,
             previous_digest,
@@ -383,6 +510,7 @@ impl AuthorityProjectionSender {
             .json()
             .await
             .map_err(|_| ProjectionSendError::InvalidResponse)?;
+        record_projection_ack(&response.ack);
         Ok(response.ack)
     }
 }
@@ -395,8 +523,14 @@ pub(crate) async fn start_managed_projection(
     if preferences.control_mode != DepotControlMode::LabbyManaged
         || preferences.managed_authority_kill_switch
     {
+        set_projection_health(false, true, None);
         return Ok(None);
     }
+    set_projection_health(
+        true,
+        false,
+        Some("Depot authority projection is initializing"),
+    );
     let endpoint = preferences
         .authority_endpoint
         .as_deref()
@@ -441,48 +575,120 @@ pub(crate) async fn start_managed_projection(
     )?;
 
     Ok(Some(tokio::spawn(async move {
-        let now = unix_now();
-        match sender.store.authority_organizations().await {
-            Ok(organizations) => {
-                for organization in organizations {
-                    match sender.send_current_snapshot(&organization, now).await {
-                        Ok((ack, Some(cutoff))) => {
-                            if let Err(error) = sender
-                                .store
-                                .supersede_authority_projection_with_snapshot(
-                                    organization,
-                                    ack.last_envelope_digest,
-                                    cutoff,
-                                    now,
-                                )
-                                .await
-                            {
-                                tracing::warn!(
-                                    error = %error,
-                                    "could not checkpoint initial Depot authority snapshot"
-                                );
-                            }
-                        }
-                        Ok((_ack, None)) => {}
-                        Err(error) => tracing::warn!(
-                            error = %error,
-                            "initial Depot authority snapshot failed; managed authority remains stale"
-                        ),
-                    }
-                }
-            }
-            Err(_) => tracing::warn!("could not enumerate authority organizations"),
-        }
-
+        let mut loop_state = ProjectionLoopState::needs_snapshot();
         let mut interval = tokio::time::interval(Duration::from_secs(5));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
-            if let Err(error) = sender.send_once(unix_now()).await {
-                tracing::warn!(error = %error, "Depot authority projection delivery failed");
+            if loop_state.next_work() == ProjectionWork::Baseline {
+                match synchronize_baseline(&sender, unix_now()).await {
+                    Ok(()) => {
+                        loop_state.baseline_finished(true);
+                        match sender.send_once(unix_now()).await {
+                            Ok(_) => mark_projection_ready(sender.key_id.as_ref()),
+                            Err(error) => {
+                                set_projection_health(
+                                    true,
+                                    false,
+                                    Some("Depot authority projection delivery failed"),
+                                );
+                                tracing::warn!(error = %error, "Depot authority projection delivery failed after baseline synchronization");
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        loop_state.baseline_finished(false);
+                        set_projection_health(
+                            true,
+                            false,
+                            Some("Depot authority projection initial synchronization failed"),
+                        );
+                        tracing::warn!(error = %error, "Depot authority baseline synchronization failed; full snapshot will be retried");
+                    }
+                }
+                continue;
+            }
+
+            match sender.send_once(unix_now()).await {
+                Ok(_) => mark_projection_ready(sender.key_id.as_ref()),
+                Err(error) => {
+                    set_projection_health(
+                        true,
+                        false,
+                        Some("Depot authority projection delivery failed"),
+                    );
+                    tracing::warn!(error = %error, "Depot authority projection delivery failed");
+                }
             }
         }
     })))
+}
+
+async fn synchronize_baseline(
+    sender: &AuthorityProjectionSender,
+    now: i64,
+) -> Result<(), ProjectionSendError> {
+    let organizations = sender.store.authority_organizations().await.map_err(|_| {
+        tracing::warn!("could not enumerate authority organizations");
+        ProjectionSendError::Store
+    })?;
+    if organizations.is_empty() {
+        return Err(ProjectionSendError::Store);
+    }
+
+    for organization in organizations {
+        match sender.send_current_snapshot(&organization, now).await? {
+            (ack, Some(cutoff)) => {
+                record_projection_ack(&ack);
+                sender
+                    .store
+                    .supersede_authority_projection_with_snapshot(
+                        organization,
+                        ack.last_envelope_digest,
+                        cutoff,
+                        now,
+                    )
+                    .await
+                    .map_err(|error| {
+                        tracing::warn!(error = %error, "could not checkpoint initial Depot authority snapshot");
+                        ProjectionSendError::Store
+                    })?;
+            }
+            (ack, None) => record_projection_ack(&ack),
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProjectionWork {
+    Baseline,
+    Deltas,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ProjectionLoopState {
+    needs_snapshot: bool,
+}
+
+impl ProjectionLoopState {
+    const fn needs_snapshot() -> Self {
+        Self {
+            needs_snapshot: true,
+        }
+    }
+
+    const fn next_work(self) -> ProjectionWork {
+        if self.needs_snapshot {
+            ProjectionWork::Baseline
+        } else {
+            ProjectionWork::Deltas
+        }
+    }
+
+    const fn baseline_finished(&mut self, accepted_and_checkpointed: bool) {
+        self.needs_snapshot = !accepted_and_checkpointed;
+    }
 }
 
 fn unix_now() -> i64 {
@@ -497,6 +703,8 @@ fn unix_now() -> i64 {
 pub(crate) struct ProjectionReadiness {
     pub(crate) ready: bool,
     #[serde(default)]
+    pub(crate) accepting: Option<bool>,
+    #[serde(default)]
     pub(crate) organizations: BTreeMap<String, ProjectionWatermark>,
 }
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -510,6 +718,33 @@ struct ProjectionResponse {
     ack: AuthorityProjectionAck,
 }
 
+#[derive(Deserialize)]
+struct SpooledAuthorityRecord {
+    resource_type: String,
+    resource_id: String,
+    value: Value,
+}
+
+fn read_spooled_chunk(
+    lines: &mut impl Iterator<Item = std::io::Result<String>>,
+) -> Result<Vec<AuthorityProjectionRecord>, ProjectionSendError> {
+    let mut chunk = Vec::with_capacity(MAX_AUTHORITY_RECORDS_PER_BATCH);
+    while chunk.len() < MAX_AUTHORITY_RECORDS_PER_BATCH {
+        let Some(line) = lines.next() else { break };
+        let record: SpooledAuthorityRecord =
+            serde_json::from_str(&line.map_err(|_| ProjectionSendError::Store)?)
+                .map_err(|_| ProjectionSendError::Store)?;
+        chunk.push(AuthorityProjectionRecord {
+            sequence: 0,
+            resource_type: record.resource_type,
+            resource_id: record.resource_id,
+            operation: "upsert".into(),
+            value: Some(record.value),
+        });
+    }
+    Ok(chunk)
+}
+
 #[derive(Serialize)]
 struct UnsignedEnvelope<'a> {
     schema_version: u16,
@@ -520,6 +755,10 @@ struct UnsignedEnvelope<'a> {
     kind: ProjectionKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     snapshot_base_sequence: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot_complete: Option<bool>,
     generated_at: &'a str,
     previous_digest: &'a Option<String>,
     payload_digest: &'a str,
@@ -532,6 +771,8 @@ fn sign_envelope(
     organization_id: &str,
     kind: ProjectionKind,
     snapshot_base_sequence: Option<u64>,
+    snapshot_id: Option<&str>,
+    snapshot_complete: Option<bool>,
     generated_at: String,
     previous_digest: Option<String>,
     key_id: &str,
@@ -558,6 +799,8 @@ fn sign_envelope(
         sequence_end,
         kind,
         snapshot_base_sequence,
+        snapshot_id,
+        snapshot_complete,
         generated_at: &generated_at,
         previous_digest: &previous_digest,
         payload_digest: &payload_digest,
@@ -577,6 +820,8 @@ fn sign_envelope(
         sequence_end,
         kind,
         snapshot_base_sequence,
+        snapshot_id: snapshot_id.map(str::to_owned),
+        snapshot_complete,
         generated_at,
         previous_digest,
         payload_digest,
@@ -584,6 +829,41 @@ fn sign_envelope(
         records,
         signature,
     })
+}
+
+fn snapshot_id(organization_id: &str, now: i64) -> String {
+    let mut digest = Sha256::new();
+    digest.update(organization_id.as_bytes());
+    digest.update(now.to_be_bytes());
+    format!("snapshot-{}", hex::encode(digest.finalize()))
+}
+
+fn rfc3339_timestamp(epoch_seconds: i64) -> Result<String, ProjectionSendError> {
+    if epoch_seconds < 0 {
+        return Err(ProjectionSendError::Configuration);
+    }
+    let days = epoch_seconds.div_euclid(86_400);
+    let seconds = epoch_seconds.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    if !(0..=9_999).contains(&year) {
+        return Err(ProjectionSendError::Configuration);
+    }
+    let hour = seconds / 3_600;
+    let minute = (seconds % 3_600) / 60;
+    let second = seconds % 60;
+    Ok(format!(
+        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z"
+    ))
 }
 
 fn canonical_json(value: &Value) -> Result<Vec<u8>, ProjectionSendError> {
@@ -606,22 +886,66 @@ fn canonical_json(value: &Value) -> Result<Vec<u8>, ProjectionSendError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn startup_snapshots_partition_above_the_delta_batch_limit() {
-        let records = (0..=MAX_AUTHORITY_RECORDS_PER_BATCH)
-            .map(|sequence| AuthorityProjectionRecord {
-                sequence: u64::try_from(sequence).unwrap(),
-                resource_type: "principal".into(),
-                resource_id: format!("principal-{sequence}"),
-                operation: "upsert".into(),
-                value: Some(serde_json::json!({"status":"active"})),
-            })
-            .collect::<Vec<_>>();
-        let chunks = records
-            .chunks(MAX_AUTHORITY_RECORDS_PER_BATCH)
-            .map(<[_]>::len)
-            .collect::<Vec<_>>();
-        assert_eq!(chunks, vec![MAX_AUTHORITY_RECORDS_PER_BATCH, 1]);
+    fn managed_projection_health_fails_closed_until_synchronized() {
+        set_projection_health(true, false, Some("projection lag is nonzero"));
+        assert_eq!(
+            managed_projection_readiness_pending().as_deref(),
+            Some("projection lag is nonzero")
+        );
+        set_projection_health(true, true, None);
+        assert!(managed_projection_readiness_pending().is_none());
+        set_projection_health(false, true, None);
+    }
+
+    #[test]
+    fn transient_baseline_rejection_cannot_fall_through_to_empty_deltas() {
+        let mut state = ProjectionLoopState::needs_snapshot();
+        assert_eq!(state.next_work(), ProjectionWork::Baseline);
+
+        // A transient Depot rejection keeps the loop on full snapshots. The
+        // empty-outbox delta path is therefore not eligible to mark Ready.
+        state.baseline_finished(false);
+        assert_eq!(state.next_work(), ProjectionWork::Baseline);
+
+        // Only an accepted and locally checkpointed baseline unlocks deltas.
+        state.baseline_finished(true);
+        assert_eq!(state.next_work(), ProjectionWork::Deltas);
+    }
+
+    #[test]
+    fn epoch_seconds_are_encoded_as_depot_parseable_rfc3339() {
+        assert_eq!(rfc3339_timestamp(0).unwrap(), "1970-01-01T00:00:00Z");
+        assert_eq!(
+            rfc3339_timestamp(951_782_400).unwrap(),
+            "2000-02-29T00:00:00Z"
+        );
+        assert!(rfc3339_timestamp(-1).is_err());
+    }
+    #[test]
+    fn spooled_snapshots_never_materialize_more_than_one_envelope() {
+        let count = MAX_AUTHORITY_RECORDS_PER_BATCH * 8 + 1;
+        let mut lines = (0..count).map(|sequence| {
+            Ok::<_, std::io::Error>(
+                serde_json::json!({
+                    "resource_type":"principal",
+                    "resource_id":format!("principal-{sequence}"),
+                    "value":{"status":"active"}
+                })
+                .to_string(),
+            )
+        });
+        let mut total = 0;
+        loop {
+            let chunk = read_spooled_chunk(&mut lines).unwrap();
+            assert!(chunk.len() <= MAX_AUTHORITY_RECORDS_PER_BATCH);
+            total += chunk.len();
+            if chunk.is_empty() {
+                break;
+            }
+        }
+        assert_eq!(total, count);
     }
 
     #[test]
@@ -639,6 +963,8 @@ mod tests {
             "org",
             ProjectionKind::Delta,
             None,
+            None,
+            None,
             "2026-09-05T00:00:00Z".into(),
             None,
             "key",
@@ -650,6 +976,8 @@ mod tests {
             "install",
             "org",
             ProjectionKind::Delta,
+            None,
+            None,
             None,
             "2026-09-05T00:00:00Z".into(),
             None,

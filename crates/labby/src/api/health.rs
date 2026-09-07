@@ -56,6 +56,10 @@ pub struct HealthResponse {
     /// Private provider protocol accepted by the integrated profile.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_protocol: Option<&'static str>,
+    /// Structured, non-secret state for the managed Depot authority projection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authority_projection:
+        Option<crate::dispatch::depot::authority_projection::ManagedProjectionReadiness>,
 }
 
 /// Liveness probe. Returns 200 as long as the process is running.
@@ -78,6 +82,7 @@ pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
             "standalone-gateway-v1"
         }),
         provider_protocol: integrated.then_some("1.0"),
+        authority_projection: crate::dispatch::depot::authority_projection::projection_readiness(),
     })
 }
 
@@ -99,6 +104,9 @@ pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     if state.enabled_services.contains("stash") {
         match state.file_stash_runtime.status().await {
             crate::file_stash::FileStashStatus::Ready => {}
+            crate::file_stash::FileStashStatus::Recovering => {
+                pending.push("File Stash recovery is still in progress".to_string());
+            }
             crate::file_stash::FileStashStatus::Blocked(reason) => {
                 pending.push(format!("File Stash unavailable: {reason:?}"));
             }
@@ -106,6 +114,12 @@ pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
                 pending.push("File Stash is shutting down".to_string());
             }
         }
+    }
+
+    if let Some(reason) =
+        crate::dispatch::depot::authority_projection::managed_projection_readiness_pending()
+    {
+        pending.push(reason);
     }
 
     // Predicate 2: when a gateway manager is wired, the pool must be present.
@@ -147,6 +161,8 @@ pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
                 pending: None,
                 capability_profile: None,
                 provider_protocol: None,
+                authority_projection:
+                    crate::dispatch::depot::authority_projection::projection_readiness(),
             }),
         )
     } else {
@@ -160,6 +176,8 @@ pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
                 pending: Some(pending),
                 capability_profile: None,
                 provider_protocol: None,
+                authority_projection:
+                    crate::dispatch::depot::authority_projection::projection_readiness(),
             }),
         )
     }

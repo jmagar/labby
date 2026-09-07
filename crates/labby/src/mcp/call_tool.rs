@@ -1598,23 +1598,36 @@ impl LabMcpServer {
                     .await
                     .map(Into::into);
             }
-            let result = if service == "access" {
+            let result = if matches!(action.as_str(), "help" | "schema") {
+                (entry.dispatch)(action.clone(), params).await
+            } else if service == "access" {
                 let auth = auth_context_from_extensions(&context.extensions);
-                let identity = context
-                    .extensions
-                    .get::<labby_auth::VerifiedIdentity>()
-                    .cloned();
-                let installation_id = context
-                    .extensions
-                    .get::<labby_primitives::product_credential::BoundAccessGrant>()
-                    .map(|grant| grant.installation_id.clone());
+                let identity =
+                    crate::mcp::context::verified_identity_from_extensions(&context.extensions)
+                        .cloned();
+                let bound_installation_id =
+                    crate::mcp::context::bound_access_grant_from_extensions(&context.extensions)
+                        .map(|grant| grant.installation_id.clone());
                 match (identity, self.access_runtime.store().await) {
                     (Some(identity), Ok(store)) => {
                         let ceiling = auth.map_or_else(
                             crate::access::AuthorityCeiling::trusted_local,
                             crate::access::AuthorityCeiling::from_auth_context,
                         );
-                        let installation_id = installation_id.unwrap_or_default();
+                        let installation_id = match bound_installation_id {
+                            Some(value) => value,
+                            None if identity.authenticator()
+                                == labby_auth::Authenticator::StaticBearer =>
+                            {
+                                store
+                                    .installation_id()
+                                    .await
+                                    .ok()
+                                    .flatten()
+                                    .unwrap_or_default()
+                            }
+                            None => String::new(),
+                        };
                         if installation_id.is_empty()
                             && matches!(
                                 action.as_str(),
@@ -1652,10 +1665,9 @@ impl LabMcpServer {
                 }
             } else if service == "dev_containers" {
                 let auth = auth_context_from_extensions(&context.extensions);
-                let identity = context
-                    .extensions
-                    .get::<labby_auth::VerifiedIdentity>()
-                    .cloned();
+                let identity =
+                    crate::mcp::context::verified_identity_from_extensions(&context.extensions)
+                        .cloned();
                 match identity {
                     Some(identity) => {
                         let ceiling = auth.map_or_else(
@@ -1717,14 +1729,18 @@ impl LabMcpServer {
                         return Ok(error_result_from_envelope(envelope).into());
                     };
                     let auth = auth_context_from_extensions(&context.extensions);
-                    let identity = context
-                        .extensions
-                        .get::<labby_auth::VerifiedIdentity>()
-                        .cloned();
+                    let identity =
+                        crate::mcp::context::verified_identity_from_extensions(&context.extensions)
+                            .cloned();
                     let team_id = params
                         .get("team_id")
                         .and_then(Value::as_str)
-                        .map(str::to_owned);
+                        .map(str::to_owned)
+                        .or_else(|| {
+                            cfg!(debug_assertions)
+                                .then(|| std::env::var("LABBY_E2E_TEAM_ID").ok())
+                                .flatten()
+                        });
                     let Some(identity) = identity else {
                         return Ok(error_result_from_envelope(build_error(
                             &service,

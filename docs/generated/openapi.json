@@ -4197,6 +4197,17 @@
           }
         }
       },
+      "AgentsAgentsListParams": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "string"
+          }
+        }
+      },
       "AgentsAgentsRunParams": {
         "type": "object",
         "required": [
@@ -5702,6 +5713,17 @@
           }
         }
       },
+      "Dev_containersDev_containersListParams": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "string"
+          }
+        }
+      },
       "Dev_containersDev_containersReconcileParams": {
         "type": "object",
         "required": [
@@ -6989,6 +7011,17 @@
           "status"
         ],
         "properties": {
+          "authority_projection": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ManagedProjectionReadiness",
+                "description": "Structured, non-secret state for the managed Depot authority projection."
+              }
+            ]
+          },
           "capability_profile": {
             "type": [
               "string",
@@ -7196,6 +7229,54 @@
           "expires_at": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "ManagedProjectionReadiness": {
+        "type": "object",
+        "required": [
+          "managed",
+          "ready",
+          "stale",
+          "lag",
+          "gap"
+        ],
+        "properties": {
+          "gap": {
+            "type": "boolean"
+          },
+          "key_generation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lag": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "managed": {
+            "type": "boolean"
+          },
+          "pending": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "watermark": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -8172,6 +8253,17 @@
         ],
         "properties": {
           "task_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TasksTasksListParams": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "limit": {
             "type": "string"
           }
         }

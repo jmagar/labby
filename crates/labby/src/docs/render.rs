@@ -117,20 +117,23 @@ pub fn proxy_config_reference(entries: &[ConfigDoc]) -> String {
 pub fn action_catalog(actions: &[ActionDoc]) -> String {
     let mut out = header("action-catalog", "labby docs generate");
     out.push_str(
-        "This is a global inventory, not the active runtime exposure or authorization policy.\n\n",
+        "This is a global inventory, not the active runtime exposure. `Admin` and `Required scopes` are transport gates; `Authorization`, `Capability`, and `Resource family` describe per-action shared-dispatch checks where the action has structured authority metadata.\n\n",
     );
-    out.push_str("| Service | Action | Built-in | Destructive | Admin | Required scopes | Params | Returns | Surfaces |\n");
-    out.push_str("| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
+    out.push_str("| Service | Action | Built-in | Destructive | Admin | Required scopes | Authorization | Capability | Resource family | Params | Returns | Surfaces |\n");
+    out.push_str("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
     for action in actions {
         writeln!(
             out,
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             code(&action.service),
             code(&action.action),
             action.builtin,
             action.destructive,
             action.requires_admin,
             cell(&action.required_scopes.join(", ")),
+            code(&action.authorization_boundary),
+            code(action.required_capability.as_deref().unwrap_or("-")),
+            code(action.resource_family.as_deref().unwrap_or("-")),
             params_cell(&action.params),
             code(&action.returns),
             cell(&surfaces(&action.surface_availability))

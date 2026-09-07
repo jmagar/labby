@@ -882,6 +882,13 @@ impl LiveGateway {
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }
+        if cfg!(debug_assertions)
+            && (action.starts_with("gateway.loadout.")
+                || action.starts_with("gateway.protected_route."))
+            && let Ok(team_id) = std::env::var("LABBY_E2E_TEAM_ID")
+        {
+            request = request.header("x-labby-team-id", team_id);
+        }
 
         let response = request.send().await.map_err(live_gateway_network_error)?;
         let status = response.status();

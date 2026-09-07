@@ -442,7 +442,20 @@
           "destructive": false,
           "requires_admin": false,
           "required_scopes": [],
-          "params": [],
+          "params": [
+            {
+              "name": "cursor",
+              "ty": "string",
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "limit",
+              "ty": "string",
+              "required": false,
+              "description": ""
+            }
+          ],
           "returns": "object"
         },
         {
@@ -609,7 +622,20 @@
           "destructive": false,
           "requires_admin": false,
           "required_scopes": [],
-          "params": [],
+          "params": [
+            {
+              "name": "cursor",
+              "ty": "string",
+              "required": false,
+              "description": ""
+            },
+            {
+              "name": "limit",
+              "ty": "string",
+              "required": false,
+              "description": ""
+            }
+          ],
           "returns": "object"
         },
         {
@@ -732,7 +758,20 @@
           "destructive": false,
           "requires_admin": false,
           "required_scopes": [],
-          "params": [],
+          "params": [
+            {
+              "name": "cursor",
+              "ty": "string",
+              "required": false,
+              "description": "Exclusive instance identifier cursor"
+            },
+            {
+              "name": "limit",
+              "ty": "string",
+              "required": false,
+              "description": "Page size from 1 through 100"
+            }
+          ],
           "returns": "object"
         },
         {

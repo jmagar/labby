@@ -171,6 +171,22 @@ or roll back expired pending rows, release orphaned reservations, and fail close
 on ambiguous or mismatched state. A database/blob mismatch is `integrity_error`,
 never an empty or missing file.
 
+Startup opens and validates the root and database, then performs crash-critical
+pending-upload reconciliation in a background lifecycle task. Readiness and
+every Stash operation fail closed with a recovering/unavailable state until
+that pass finishes. Its cursor is durably checkpointed after each bounded batch,
+so an interrupted process resumes without replaying completed entries. Once the
+runtime becomes ready, committed-blob verification and orphan hygiene continue
+as non-critical background work; opened blobs still verify their expected size.
+Synchronous descriptor-relative filesystem batches run on the blocking pool.
+A recovery error changes the runtime to a blocked state and prevents the janitor
+from starting.
+
+SQLite mutations retain one serialized transactional writer. Query-only work is
+distributed across a bounded four-connection read pool, with shared queue and
+deadline admission, so unrelated reads can overlap without weakening write
+ordering or overload behavior.
+
 File content is untrusted and plaintext at rest in v1. Operators must include
 both database and blob directories in a consistent backup and restrict host
 access; restore must preserve their shared generation. Encryption at rest,

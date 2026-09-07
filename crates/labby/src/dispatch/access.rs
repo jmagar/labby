@@ -594,7 +594,16 @@ fn map_access_error(error: crate::access::AccessStoreError) -> ToolError {
 }
 
 /// Registry fallback. Real API/MCP adapters must supply server-owned state and identity.
-pub async fn dispatch_unbound(_action: &str, _params: Value) -> Result<Value, ToolError> {
+pub async fn dispatch_unbound(action: &str, params: Value) -> Result<Value, ToolError> {
+    if action == "help" {
+        return Ok(crate::dispatch::helpers::help_payload("access", ACTIONS));
+    }
+    if action == "schema" {
+        return crate::dispatch::helpers::action_schema(
+            ACTIONS,
+            &required_string(&params, "action")?,
+        );
+    }
     Err(ToolError::Forbidden {
         message: "access administration requires host-established identity".to_owned(),
         required_scopes: Vec::new(),

@@ -223,10 +223,18 @@ impl BlobStore {
     }
 
     pub(crate) async fn recover(&self) -> Result<()> {
+        #[cfg(all(test, any(target_os = "linux", target_os = "android")))]
+        if regular_size(&self.tmp, "recovery.pause")?.is_some() {
+            TEST_RECOVERY_RESUME.notified().await;
+            remove_regular_if_exists(&self.tmp, "recovery.pause")?;
+        }
         let page_size = self.limits.janitor_batch_size;
-        let mut after = String::new();
+        let mut after = self.store.begin_recovery().await?;
         loop {
-            let page = self.store.pending_for_recovery(after, page_size).await?;
+            let page = self
+                .store
+                .pending_for_recovery(after.clone(), page_size)
+                .await?;
             if page.is_empty() {
                 break;
             }
@@ -235,9 +243,18 @@ impl BlobStore {
                 .map(|item| item.upload_id.clone())
                 .unwrap_or_default();
             for pending in page {
-                self.reconcile_pending(pending).await?;
+                if let Err(error) = self.reconcile_pending(pending).await {
+                    return Err(error);
+                }
             }
+            self.store.checkpoint_recovery(after.clone()).await?;
+            tokio::task::yield_now().await;
         }
+        self.store.complete_recovery().await
+    }
+
+    pub(super) async fn cleanup_after_recovery(&self) -> Result<()> {
+        let page_size = self.limits.janitor_batch_size;
         let mut after = String::new();
         loop {
             let page = self.store.committed_blob_keys(after, page_size).await?;
@@ -247,12 +264,18 @@ impl BlobStore {
             after = page.last().map(|item| item.0.clone()).unwrap_or_default();
             for (name, expected) in page {
                 validate_blob_key(&name)?;
-                if regular_size(&self.blobs, &name)? != Some(expected) {
+                if regular_size_async(Arc::clone(&self.blobs), name).await? != Some(expected) {
                     return Err(FileStashStoreError::Integrity);
                 }
             }
+            tokio::task::yield_now().await;
         }
-        remove_unreferenced_tmp(&self.tmp, page_size).await?;
+        let active = self
+            .active_uploads
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        remove_unreferenced_tmp(Arc::clone(&self.tmp), page_size, active).await?;
         self.remove_orphan_blobs().await?;
         Ok(())
     }
@@ -276,17 +299,23 @@ impl BlobStore {
         Ok(expired.len())
     }
 
+    pub(super) fn close_store(&self) {
+        self.store.close();
+    }
+
     async fn reconcile_pending(&self, pending: PendingRecovery) -> Result<()> {
         validate_blob_key(&pending.upload_id)?;
         let temp_name = format!("{}.part", pending.upload_id);
-        remove_regular_if_exists(&self.tmp, &temp_name)?;
+        remove_regular_async(Arc::clone(&self.tmp), temp_name).await?;
         match pending.state.as_str() {
             "pending" => {
-                remove_regular_if_exists(&self.blobs, &pending.upload_id)?;
+                remove_regular_async(Arc::clone(&self.blobs), pending.upload_id.clone()).await?;
                 self.store.cancel_upload(pending.upload_id).await
             }
             "blob_published" => {
-                if regular_size(&self.blobs, &pending.upload_id)? != Some(pending.reserved_bytes) {
+                if regular_size_async(Arc::clone(&self.blobs), pending.upload_id.clone()).await?
+                    != Some(pending.reserved_bytes)
+                {
                     return Err(FileStashStoreError::Integrity);
                 }
                 self.store
@@ -365,17 +394,14 @@ impl BlobStore {
     }
 
     async fn remove_orphan_blobs(&self) -> Result<()> {
-        let entries = rustix::fs::Dir::read_from(&*self.blobs)
-            .map_err(|_| FileStashStoreError::Unavailable)?;
+        let directory = Arc::clone(&self.blobs);
+        let names = tokio::task::spawn_blocking(move || directory_names(&directory))
+            .await
+            .map_err(|_| FileStashStoreError::Unavailable)??;
         let mut batch = Vec::with_capacity(self.limits.janitor_batch_size);
-        for entry in entries {
-            let entry = entry.map_err(|_| FileStashStoreError::Unavailable)?;
-            let name = entry.file_name().to_string_lossy();
-            if name == "." || name == ".." {
-                continue;
-            }
+        for name in names {
             validate_blob_key(&name)?;
-            batch.push(name.into_owned());
+            batch.push(name);
             if batch.len() == self.limits.janitor_batch_size {
                 self.remove_orphan_batch(std::mem::take(&mut batch)).await?;
             }
@@ -387,13 +413,30 @@ impl BlobStore {
     async fn remove_orphan_batch(&self, batch: Vec<String>) -> Result<()> {
         let committed = self.store.committed_blob_membership(batch.clone()).await?;
         for name in batch {
-            if !committed.contains(&name) {
-                remove_regular_if_exists(&self.blobs, &name)?;
+            let active = self
+                .active_uploads
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .contains(&name);
+            if !committed.contains(&name) && !active {
+                remove_regular_async(Arc::clone(&self.blobs), name).await?;
             }
         }
         tokio::task::yield_now().await;
         Ok(())
     }
+}
+
+async fn remove_regular_async(directory: Arc<File>, name: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || remove_regular_if_exists(&directory, &name))
+        .await
+        .map_err(|_| FileStashStoreError::Unavailable)?
+}
+
+async fn regular_size_async(directory: Arc<File>, name: String) -> Result<Option<u64>> {
+    tokio::task::spawn_blocking(move || regular_size(&directory, &name))
+        .await
+        .map_err(|_| FileStashStoreError::Unavailable)?
 }
 
 pub(crate) struct UploadAdmission {
@@ -551,24 +594,61 @@ fn remove_regular_if_exists(directory: &File, name: &str) -> Result<()> {
 static FAIL_UNLINK_NAME: std::sync::LazyLock<Mutex<Option<String>>> =
     std::sync::LazyLock::new(|| Mutex::new(None));
 
+#[cfg(all(test, any(target_os = "linux", target_os = "android")))]
+pub(super) static TEST_RECOVERY_RESUME: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
-async fn remove_unreferenced_tmp(directory: &File, batch_size: usize) -> Result<()> {
-    let entries =
-        rustix::fs::Dir::read_from(directory).map_err(|_| FileStashStoreError::Unavailable)?;
-    let mut processed = 0_usize;
-    for entry in entries {
-        let entry = entry.map_err(|_| FileStashStoreError::Unavailable)?;
-        let name = entry.file_name().to_string_lossy();
-        if name == "." || name == ".." {
-            continue;
-        }
-        remove_regular_if_exists(directory, &name)?;
-        processed += 1;
-        if processed.is_multiple_of(batch_size) {
-            tokio::task::yield_now().await;
-        }
+async fn remove_unreferenced_tmp(
+    directory: Arc<File>,
+    batch_size: usize,
+    active: HashSet<String>,
+) -> Result<()> {
+    let active = Arc::new(active);
+    let listed = Arc::clone(&directory);
+    let names = tokio::task::spawn_blocking(move || directory_names(&listed))
+        .await
+        .map_err(|_| FileStashStoreError::Unavailable)??;
+    for batch in names.chunks(batch_size.max(1)) {
+        let directory = Arc::clone(&directory);
+        let active = Arc::clone(&active);
+        let batch = batch.to_vec();
+        tokio::task::spawn_blocking(move || {
+            for name in batch {
+                validate_child_name(&name)?;
+                if name
+                    .strip_suffix(".part")
+                    .is_some_and(|upload_id| active.contains(upload_id))
+                {
+                    continue;
+                }
+                remove_regular_if_exists(&directory, &name)?;
+            }
+            sync_directory(&directory)
+        })
+        .await
+        .map_err(|_| FileStashStoreError::Unavailable)??;
     }
     Ok(())
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn directory_names(directory: &File) -> Result<Vec<String>> {
+    let entries =
+        rustix::fs::Dir::read_from(directory).map_err(|_| FileStashStoreError::Unavailable)?;
+    entries
+        .filter_map(|entry| match entry {
+            Ok(entry) => {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                (name != "." && name != "..").then_some(Ok(name))
+            }
+            Err(_) => Some(Err(FileStashStoreError::Unavailable)),
+        })
+        .collect()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn directory_names(_: &File) -> Result<Vec<String>> {
+    Err(FileStashStoreError::Unavailable)
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -615,7 +695,7 @@ fn remove_regular_if_exists(_: &File, _: &str) -> Result<()> {
     Err(FileStashStoreError::Unavailable)
 }
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
-async fn remove_unreferenced_tmp(_: &File, _: usize) -> Result<()> {
+async fn remove_unreferenced_tmp(_: Arc<File>, _: usize, _: HashSet<String>) -> Result<()> {
     Err(FileStashStoreError::Unavailable)
 }
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
@@ -961,7 +1041,7 @@ mod tests {
             super::super::FileStashRuntime::initialize_with_preferences(stash_root, preferences())
                 .await;
         assert_eq!(
-            restarted.status().await,
+            restarted.wait_for_recovery().await,
             super::super::FileStashStatus::Ready
         );
         let usage = restarted
@@ -1028,7 +1108,7 @@ mod tests {
         assert_eq!(
             super::super::FileStashRuntime::initialize_with_preferences(stash_root, preferences())
                 .await
-                .status()
+                .wait_for_recovery()
                 .await,
             super::super::FileStashStatus::Blocked(super::super::FileStashBlockedReason::Corrupt)
         );

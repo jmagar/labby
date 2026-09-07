@@ -1,163 +1,95 @@
 #!/usr/bin/env python3
-"""Validate fail-closed Labby/Depot ownership-migration rehearsal evidence."""
-
+"""Generate and verify provenance-bound migration rehearsal evidence."""
 from __future__ import annotations
-
-import argparse
-import json
-import re
+import argparse, hashlib, json, sqlite3
 from pathlib import Path
 from typing import Any
 
-SHA256 = re.compile(r"[0-9a-f]{64}")
-
-REQUIRED_INVENTORIES = {
-    "labby": {
-        "access_metadata",
-        "organizations",
-        "principals",
-        "principal_links",
-        "projects",
-        "project_memberships",
-        "project_loadouts",
-        "project_policy_publications",
-        "access_audit",
-        "access_admission_buckets",
-        "access_security_events",
-    },
-    "depot": {
-        "skills",
-        "origins",
-        "bundles",
-        "cas",
-        "tokens",
-        "secrets",
-        "sources",
-        "jobs",
-        "job_inputs",
-        "uploads",
-        "artifacts",
-        "artifact_candidates",
-    },
+SCHEMA = "labby.multi-user-migration-rehearsal/v2"
+MINIMUM_TABLES = {
+    "labby": {"access_metadata", "organizations", "principals", "principal_links", "projects", "access_audit"},
+    "depot": {"skills", "origins", "bundles", "jobs", "uploads", "artifacts"},
 }
 
+def fail(message: str) -> None: raise ValueError(message)
 
-def fail(message: str) -> None:
-    raise ValueError(message)
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""): digest.update(chunk)
+    return digest.hexdigest()
 
+def encoded(value: Any) -> Any:
+    return {"bytesSha256": hashlib.sha256(value).hexdigest(), "length": len(value)} if isinstance(value, bytes) else value
 
-def digest(value: Any, path: str) -> str:
-    if not isinstance(value, str) or not SHA256.fullmatch(value):
-        fail(f"{path} must be a lowercase SHA-256 digest")
-    return value
+def inventory(path: Path, system: str) -> list[dict[str, Any]]:
+    connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro&immutable=1", uri=True)
+    try:
+        if connection.execute("PRAGMA quick_check").fetchone() != ("ok",): fail(f"{system} quick_check failed")
+        if connection.execute("PRAGMA foreign_key_check").fetchall(): fail(f"{system} foreign_key_check failed")
+        tables = [row[0] for row in connection.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        missing = MINIMUM_TABLES[system] - set(tables)
+        if missing: fail(f"{system} database is missing required tables: {sorted(missing)}")
+        result = []
+        canonical = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        for table in tables:
+            quoted = '"' + table.replace('"', '""') + '"'
+            columns = connection.execute(f"PRAGMA table_info({quoted})").fetchall()
+            names = [column[1] for column in columns]
+            primary = [column[1] for column in sorted(columns, key=lambda value: value[5]) if column[5]]
+            order = primary or names
+            order_sql = ",".join('"' + value.replace('"', '""') + '"' for value in order)
+            rows = connection.execute(f"SELECT * FROM {quoted}" + (f" ORDER BY {order_sql}" if order_sql else "")).fetchall()
+            logical = [[encoded(value) for value in row] for row in rows]
+            ids = [[encoded(row[names.index(name)]) for name in primary] for row in rows] if primary else logical
+            result.append({"table": table, "count": len(rows), "stableIdsSha256": hashlib.sha256(canonical(ids)).hexdigest(), "contentSha256": hashlib.sha256(canonical(logical)).hexdigest()})
+        return result
+    finally: connection.close()
 
+def source(path: Path, system: str) -> dict[str, Any]:
+    resolved = path.resolve(strict=True)
+    return {"path": str(resolved), "sha256": sha256_file(resolved), "inventory": inventory(resolved, system)}
 
-def count(value: Any, path: str) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        fail(f"{path} must be a non-negative integer")
-    return value
-
-
-def snapshot(value: Any, path: str) -> tuple[int, str, str]:
-    if not isinstance(value, dict):
-        fail(f"{path} must be an object")
-    if set(value) != {"count", "stableIdsSha256", "contentSha256"}:
-        fail(f"{path} must contain count, stableIdsSha256, and contentSha256 exactly")
-    return (
-        count(value["count"], f"{path}.count"),
-        digest(value["stableIdsSha256"], f"{path}.stableIdsSha256"),
-        digest(value["contentSha256"], f"{path}.contentSha256"),
-    )
-
-
-def validate_inventory(system: str, value: Any) -> None:
-    path = f"systems.{system}.inventory"
-    if not isinstance(value, list):
-        fail(f"{path} must be an array")
-    rows: dict[str, dict[str, Any]] = {}
-    for offset, row in enumerate(value):
-        row_path = f"{path}[{offset}]"
-        if not isinstance(row, dict):
-            fail(f"{row_path} must be an object")
-        required = {"class", "pre", "post", "expected"}
-        if set(row) != required:
-            fail(f"{row_path} must contain class, pre, post, and expected exactly")
-        name = row["class"]
-        if not isinstance(name, str) or not name:
-            fail(f"{row_path}.class must be a non-empty string")
-        if name in rows:
-            fail(f"{path} contains duplicate class {name}")
-        rows[name] = row
-
-    expected_classes = REQUIRED_INVENTORIES[system]
-    actual_classes = set(rows)
-    if actual_classes != expected_classes:
-        fail(
-            f"{path} class mismatch; missing={sorted(expected_classes - actual_classes)} "
-            f"unexpected={sorted(actual_classes - expected_classes)}"
-        )
-
-    for name, row in rows.items():
-        row_path = f"{path}.{name}"
-        pre_count, pre_ids, pre_content = snapshot(row["pre"], f"{row_path}.pre")
-        post_count, post_ids, post_content = snapshot(row["post"], f"{row_path}.post")
-        expected = row["expected"]
-        expected_keys = {
-            "countDelta",
-            "preserveStableIds",
-            "preserveContent",
-            "quarantineCount",
-        }
-        if not isinstance(expected, dict) or set(expected) != expected_keys:
-            fail(f"{row_path}.expected has an incomplete expectation set")
-        delta = expected["countDelta"]
-        if not isinstance(delta, int) or isinstance(delta, bool):
-            fail(f"{row_path}.expected.countDelta must be an integer")
-        quarantine = count(
-            expected["quarantineCount"], f"{row_path}.expected.quarantineCount"
-        )
-        for key in ("preserveStableIds", "preserveContent"):
-            if not isinstance(expected[key], bool):
-                fail(f"{row_path}.expected.{key} must be boolean")
-        if post_count - pre_count != delta:
-            fail(f"{row_path} count delta does not match its expectation")
-        if quarantine > post_count:
-            fail(f"{row_path} quarantine count exceeds the post-migration count")
-        if expected["preserveStableIds"] and pre_ids != post_ids:
-            fail(f"{row_path} changed stable IDs")
-        if expected["preserveContent"] and pre_content != post_content:
-            fail(f"{row_path} changed durable content")
-        if quarantine and name not in {"jobs", "artifacts", "artifact_candidates"}:
-            fail(f"{row_path} is not an approved quarantine-bearing inventory")
-
+def generate(args: argparse.Namespace) -> dict[str, Any]:
+    checkpoint, rollback = args.checkpoint.resolve(strict=True), args.rollback_checkpoint.resolve(strict=True)
+    document = {"schemaVersion": SCHEMA, "operationId": args.operation_id, "sourceCommit": args.source_commit, "targetCommit": args.target_commit,
+        "checkpoint": {"path": str(checkpoint), "sha256": sha256_file(checkpoint)}, "rollbackCheckpoint": {"path": str(rollback), "sha256": sha256_file(rollback)},
+        "systems": {system: {stage: source(getattr(args, f"{system}_{stage}"), system) for stage in ("pre", "post")} for system in MINIMUM_TABLES}}
+    validate(document); return document
 
 def validate(document: Any) -> None:
-    if not isinstance(document, dict):
-        fail("rehearsal manifest must be an object")
-    if document.get("schemaVersion") != "labby.multi-user-migration-rehearsal/v1":
-        fail("unsupported rehearsal manifest schemaVersion")
-    checkpoint = digest(document.get("checkpointSha256"), "checkpointSha256")
-    if digest(document.get("rollbackCheckpointSha256"), "rollbackCheckpointSha256") != checkpoint:
-        fail("rollback checkpoint must exactly match the pre-migration checkpoint")
+    if not isinstance(document, dict) or document.get("schemaVersion") != SCHEMA: fail("unsupported rehearsal manifest schemaVersion")
+    for field in ("operationId", "sourceCommit", "targetCommit"):
+        if not isinstance(document.get(field), str) or not document[field].strip(): fail(f"{field} must be non-empty")
+    checkpoint, rollback = document.get("checkpoint", {}), document.get("rollbackCheckpoint", {})
+    if checkpoint.get("sha256") != rollback.get("sha256"): fail("rollback checkpoint must exactly match the pre-migration checkpoint")
+    for label, value in (("checkpoint", checkpoint), ("rollbackCheckpoint", rollback)):
+        path = Path(value.get("path", ""))
+        if not path.is_absolute() or sha256_file(path) != value.get("sha256"): fail(f"{label} provenance does not match the actual file")
     systems = document.get("systems")
-    if not isinstance(systems, dict) or set(systems) != set(REQUIRED_INVENTORIES):
-        fail("systems must contain exactly labby and depot")
-    for system in REQUIRED_INVENTORIES:
-        value = systems[system]
-        if not isinstance(value, dict) or set(value) != {"inventory"}:
-            fail(f"systems.{system} must contain inventory exactly")
-        validate_inventory(system, value["inventory"])
-
+    if not isinstance(systems, dict) or set(systems) != set(MINIMUM_TABLES): fail("systems must contain exactly labby and depot")
+    for system in sorted(MINIMUM_TABLES):
+        stages = systems[system]
+        if not isinstance(stages, dict) or set(stages) != {"pre", "post"}: fail(f"systems.{system} must contain pre and post")
+        for stage in ("pre", "post"):
+            claimed, path = stages[stage], Path(stages[stage].get("path", ""))
+            if not path.is_absolute() or sha256_file(path) != claimed.get("sha256"): fail(f"systems.{system}.{stage} provenance does not match the actual store")
+            if claimed.get("inventory") != inventory(path, system): fail(f"systems.{system}.{stage} inventory does not match the actual store")
+        before = {row["table"]: row for row in stages["pre"]["inventory"]}; after = {row["table"]: row for row in stages["post"]["inventory"]}
+        if set(before) - set(after): fail(f"systems.{system} lost tables: {sorted(set(before)-set(after))}")
+        for table in sorted(set(before) & set(after) - {"access_metadata"}):
+            if before[table] != after[table]: fail(f"systems.{system}.{table} changed durable inventory")
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("manifest", type=Path)
-    args = parser.parse_args()
+    root = argparse.ArgumentParser(); commands = root.add_subparsers(dest="command", required=True)
+    check = commands.add_parser("verify"); check.add_argument("manifest", type=Path)
+    create = commands.add_parser("generate")
+    for flag in ("labby-pre", "labby-post", "depot-pre", "depot-post", "checkpoint", "rollback-checkpoint"): create.add_argument(f"--{flag}", type=Path, required=True)
+    for flag in ("operation-id", "source-commit", "target-commit"): create.add_argument(f"--{flag}", required=True)
+    create.add_argument("--output", type=Path, required=True); args = root.parse_args()
     try:
-        validate(json.loads(args.manifest.read_text(encoding="utf-8")))
-    except (OSError, json.JSONDecodeError, ValueError) as error:
-        raise SystemExit(f"migration rehearsal rejected: {error}") from error
+        if args.command == "verify": validate(json.loads(args.manifest.read_text()))
+        else: args.output.write_text(json.dumps(generate(args), indent=2, sort_keys=True) + "\n")
+    except (OSError, sqlite3.Error, json.JSONDecodeError, ValueError) as error: raise SystemExit(f"migration rehearsal rejected: {error}") from error
 
-
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()

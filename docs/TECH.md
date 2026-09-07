@@ -91,10 +91,10 @@ Current `labby` rules:
 - `skills` enables Agent Skills over MCP support where the gateway is present
 - `doctor`, `server_logs`, `setup`, and `snippets` are always-on services
 - retired ACP, Registry-browser, Marketplace, Fleet, Deploy-product, and Agent
-  Artifact Manager feature names are not compatibility aliases; the approved
-  principal-scoped File Stash is approved for eventual default `gateway-host`
-  composition, not yet registered functionality and not a revival of the
-  retired `stash` Cargo feature
+  Artifact Manager feature names are not compatibility aliases; the
+  principal-scoped File Stash is runtime-conditional default `gateway-host`
+  functionality on Linux and Android, is omitted on unsupported targets, and
+  is not a revival of the retired `stash` Cargo feature
 
 The generated [feature matrix](./generated/feature-matrix.md) is authoritative
 for the exact current Cargo feature projection.

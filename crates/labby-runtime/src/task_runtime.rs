@@ -63,6 +63,14 @@ impl TaskScheduler {
                 .owners
                 .lock()
                 .map_err(|_| TaskRuntimeError::Unavailable)?;
+            // A completed owner's semaphore is referenced only by this map. Drop
+            // those idle entries opportunistically on every admission so churn
+            // cannot make scheduler memory grow with historical owners.
+            owners.retain(|existing, semaphore| {
+                existing == &key
+                    || Arc::strong_count(semaphore) > 1
+                    || semaphore.available_permits() != self.per_owner_limit
+            });
             owners
                 .entry(key)
                 .or_insert_with(|| Arc::new(Semaphore::new(self.per_owner_limit)))
@@ -72,6 +80,11 @@ impl TaskScheduler {
             .acquire_owned()
             .await
             .map_err(|_| TaskRuntimeError::Unavailable)
+    }
+
+    #[cfg(test)]
+    fn retained_owner_count(&self) -> usize {
+        self.owners.lock().expect("scheduler mutex").len()
     }
 }
 
@@ -174,6 +187,7 @@ pub enum TaskRuntimeError {
 mod tests {
     use super::*;
     use crate::{agent_runtime::*, authority::*};
+    use labby_primitives::access::PrincipalId;
     use labby_primitives::agent::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     struct Ledger {
@@ -204,6 +218,16 @@ mod tests {
         }
     }
     struct Exec;
+
+    #[tokio::test]
+    async fn idle_owner_semaphores_are_evicted_during_owner_churn() {
+        let scheduler = TaskScheduler::new(2).unwrap();
+        for index in 0..1_000 {
+            let owner = OwnerScope::Personal(PrincipalId::new(format!("p-{index}")).unwrap());
+            drop(scheduler.admit(&owner).await.unwrap());
+        }
+        assert_eq!(scheduler.retained_owner_count(), 1);
+    }
     impl AgentExecutor for Exec {
         async fn execute(
             &self,

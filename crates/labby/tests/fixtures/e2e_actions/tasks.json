@@ -1,0 +1,20 @@
+{
+  "service": "tasks",
+  "api_path": "/v1/tasks",
+  "cli_probe": null,
+  "can_mutate": true,
+  "success_action": "tasks.list",
+  "invalid_action": "schema",
+  "policy_action": "tasks.cancel",
+  "workflow": ["tasks.create", "tasks.queue", "tasks.cancel"],
+  "parameters": {
+    "action": "tasks.list",
+    "agent_id": "matrix-agent",
+    "idempotency_key": "matrix-idempotency-key",
+    "input_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "owner_id": "bootstrap-owner",
+    "owner_kind": "personal",
+    "task_id": "matrix-task"
+  },
+  "action_params": {}
+}

@@ -261,6 +261,25 @@ for example, a persisted upstream may point at
 Use [../generated/env-reference.md](../generated/env-reference.md) for the current
 required/optional environment-variable matrix, secret flags, and examples.
 
+### Access-store migration approval
+
+Opening an existing access schema v5 or v6 with a schema-v7 binary is denied
+unless the operator supplies an approval document bound to an independent
+rollback checkpoint, the exact source and target, and an explicit activation:
+
+```env
+LABBY_ACCESS_MIGRATION_EVIDENCE=/run/labby/access-migration-v7.json
+```
+
+The JSON document uses schema `labby.access-migration-approval/v1` and contains
+`operation_id`, `source_version`, `target_version`, `target_fingerprint`,
+`source_sha256`, `checkpoint_path`, `checkpoint_sha256`, and `activate: true`.
+The checkpoint must be a separate file whose bytes exactly match both the
+quiesced source and the recorded digests. Set this only
+after completing and retaining the rehearsal evidence described in the
+multi-user migration runbook. Missing, stale, mismatched, or replayed evidence
+leaves the access runtime unavailable without changing the database.
+
 ## Provisioning Environment
 
 `labby setup --provision` and `scripts/incus-bootstrap.sh` also honor:

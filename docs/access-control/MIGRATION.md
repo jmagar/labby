@@ -21,6 +21,15 @@ pre-migration checkpoint. After it, rollback means forward repair or restoring
 the complete checkpoint and losing all later writes; an old binary must never
 open the new store and reinterpret scoped rows as globally owned.
 
+Ordinary startup does not cross the v5/v6-to-v7 schema boundary implicitly.
+After completing the pre-activation evidence below, the operator must set
+`LABBY_ACCESS_MIGRATION_EVIDENCE` to the owner-controlled approval document
+described in [ENV.md](../runtime/ENV.md). Labby binds that document to an
+independent checkpoint, the exact source/target schema pair, a durable operation
+ID, and an explicit activation decision before opening an exclusive migration
+transaction. A prepared sidecar marker makes an interrupted attempt replay only
+with the same evidence; successful commit publishes a complete marker.
+
 The migration is split into separately observable phases:
 
 1. `inventory`: open v5 read-only, run quick/FK/schema/bootstrap validation,
@@ -65,9 +74,10 @@ digest per table, `quick_check`, `foreign_key_check`, and source file/sidecar
 digests. File-byte equality is not expected after a valid SQLite migration;
 logical digests are canonical encodings ordered by primary key.
 
-The checked unit rehearsal additionally uses a dense v4 input because v4 to v5
-is the latest real migration path. It proves data preservation, current schema
-integrity, two clean reopens, and restoration of the unchanged v4 checkpoint.
+The current checked rehearsal validates only the schema and internal
+consistency of a supplied evidence manifest. It does not execute a v4-to-v5 or
+v5-to-v7 migration, reopen SQLite, or restore a checkpoint. Executable
+migration and restore evidence remains an activation prerequisite.
 
 ## Ownership classification
 
@@ -97,7 +107,9 @@ Activation requires:
 
 ## Failure injection
 
-CI interrupts the rehearsal before and after every phase marker and injects:
+Before production activation, a separate executable rehearsal must interrupt
+every phase and inject the following failures. This proof is not provided by
+`validate-multi-user-migration-rehearsal.py`:
 
 - busy/locked, read-only, disk-full, I/O, corrupt/not-a-database, and truncated
   SQLite inputs;

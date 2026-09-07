@@ -38,6 +38,14 @@ const fn param(name: &'static str) -> ParamSpec {
         description: "",
     }
 }
+const fn optional_param(name: &'static str) -> ParamSpec {
+    ParamSpec {
+        name,
+        ty: "string",
+        required: false,
+        description: "",
+    }
+}
 const fn action(
     name: &'static str,
     description: &'static str,
@@ -65,7 +73,11 @@ pub const ACTIONS: &[ActionSpec] = &[
             param("input_digest"),
         ],
     ),
-    action("tasks.list", "List caller-visible Agent Tasks", &[]),
+    action(
+        "tasks.list",
+        "List caller-visible Agent Tasks",
+        &[optional_param("cursor"), optional_param("limit")],
+    ),
     action(
         "tasks.get",
         "Get a caller-visible Agent Task",
@@ -153,23 +165,30 @@ pub(crate) async fn dispatch(
             Ok(json!({"task_id":id,"state":"created"}))
         }
         "tasks.list" => {
-            let mut tasks = Vec::new();
-            for record in context.store.list_agent_tasks().await.map_err(map)? {
-                if authorize(
-                    &context,
-                    name,
-                    &record.intent.owner,
-                    record.intent.id.clone(),
-                    Capability::ScopeRead,
-                    now,
-                )
+            let limit = page_limit(&params)?;
+            let cursor = params
+                .get("cursor")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let probe_owner = OwnerScope::Installation(
+                InstallationId::new("authorized-list-probe").map_err(|_| internal())?,
+            );
+            let request = authority_request(
+                &context,
+                name,
+                &probe_owner,
+                "authorized-list-probe".to_owned(),
+                Capability::ScopeRead,
+                now,
+            )?;
+            let page = context
+                .store
+                .list_authorized_agent_tasks(cursor.to_owned(), limit, request)
                 .await
-                .is_ok()
-                {
-                    tasks.push(render(&record));
-                }
-            }
-            Ok(json!({"tasks":tasks}))
+                .map_err(map)?;
+            let next_cursor = page.last().map(|record| record.intent.id.clone());
+            let tasks = page.iter().map(render).collect::<Vec<_>>();
+            Ok(json!({"tasks":tasks,"next_cursor":next_cursor}))
         }
         "tasks.get" | "tasks.result" => {
             let record = load(&context, &params).await?;
@@ -413,7 +432,16 @@ impl AgentExecutor for DisabledExecutor {
         _: AgentExecutionRequest,
         _: ExecutionGuard<'_>,
     ) -> Result<AgentExecutionOutput, AgentRuntimeError> {
-        Err(AgentRuntimeError::ExecutorFailed)
+        if cfg!(debug_assertions) && std::env::var_os("LABBY_E2E_DETERMINISTIC_EXECUTORS").is_some()
+        {
+            Ok(AgentExecutionOutput {
+                digest: format!("sha256:{}", "0".repeat(64)),
+                bytes: 0,
+                external_effects: 0,
+            })
+        } else {
+            Err(AgentRuntimeError::ExecutorFailed)
+        }
     }
 }
 struct StoreLedger {
@@ -523,6 +551,17 @@ fn required(v: &Value, k: &str) -> Result<String, ToolError> {
         .map(ToOwned::to_owned)
         .ok_or_else(|| invalid(k))
 }
+fn page_limit(params: &Value) -> Result<usize, ToolError> {
+    match params.get("limit") {
+        None | Some(Value::Null) => Ok(100),
+        Some(Value::String(value)) => value
+            .parse::<usize>()
+            .ok()
+            .filter(|value| (1..=100).contains(value))
+            .ok_or_else(|| invalid("limit")),
+        _ => Err(invalid("limit")),
+    }
+}
 fn now() -> Result<u64, ToolError> {
     u64::try_from(
         SystemTime::now()
@@ -566,7 +605,13 @@ fn unknown(name: &str) -> ToolError {
             .map(|a| a.name.into()),
     }
 }
-pub async fn dispatch_unbound(_: &str, _: Value) -> Result<Value, ToolError> {
+pub async fn dispatch_unbound(name: &str, params: Value) -> Result<Value, ToolError> {
+    if name == "help" {
+        return Ok(crate::dispatch::helpers::help_payload("tasks", ACTIONS));
+    }
+    if name == "schema" {
+        return crate::dispatch::helpers::action_schema(ACTIONS, &required(&params, "action")?);
+    }
     Err(denied())
 }
 

@@ -1,4 +1,7 @@
 use rusqlite::{Connection, TransactionBehavior, params};
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
 
 use super::error::{AccessStoreError, AccessStoreResult};
 
@@ -47,6 +50,11 @@ pub(super) fn migrate(connection: &mut Connection) -> AccessStoreResult<()> {
             supported: SCHEMA_VERSION,
         });
     }
+    let migration_operation = if matches!(found, V5_SCHEMA_VERSION | V6_SCHEMA_VERSION) {
+        Some(require_migration_evidence(connection, found)?)
+    } else {
+        None
+    };
     if found == 0 {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Exclusive)
@@ -230,6 +238,7 @@ pub(super) fn migrate(connection: &mut Connection) -> AccessStoreResult<()> {
         transaction
             .commit()
             .map_err(super::store::map_sqlite_error)?;
+        complete_migration_operation(migration_operation.as_ref().expect("v5 operation"))?;
     }
     if found == V6_SCHEMA_VERSION {
         let transaction = connection
@@ -278,8 +287,185 @@ pub(super) fn migrate(connection: &mut Connection) -> AccessStoreResult<()> {
         transaction
             .commit()
             .map_err(super::store::map_sqlite_error)?;
+        complete_migration_operation(migration_operation.as_ref().expect("v6 operation"))?;
     }
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MigrationEvidence {
+    schema_version: String,
+    operation_id: String,
+    source_version: i64,
+    target_version: i64,
+    target_fingerprint: String,
+    source_sha256: String,
+    checkpoint_path: PathBuf,
+    checkpoint_sha256: String,
+    activate: bool,
+}
+
+struct MigrationOperation {
+    marker_path: Option<PathBuf>,
+    operation_id: String,
+    checkpoint_sha256: String,
+}
+
+fn invalid_evidence(reason: impl Into<String>) -> AccessStoreError {
+    AccessStoreError::MigrationEvidenceInvalid {
+        reason: reason.into(),
+    }
+}
+
+#[cfg(test)]
+fn require_migration_evidence(
+    _connection: &Connection,
+    found: i64,
+) -> AccessStoreResult<MigrationOperation> {
+    // Unit migration fixtures exercise the transform itself. Production-shaped
+    // gate/replay coverage calls `verify_migration_evidence` directly.
+    Ok(MigrationOperation {
+        marker_path: None,
+        operation_id: format!("unit-v{found}"),
+        checkpoint_sha256: "unit-fixture".into(),
+    })
+}
+
+#[cfg(not(test))]
+fn require_migration_evidence(
+    connection: &Connection,
+    found: i64,
+) -> AccessStoreResult<MigrationOperation> {
+    let evidence_path = std::env::var_os("LABBY_ACCESS_MIGRATION_EVIDENCE")
+        .map(PathBuf::from)
+        .ok_or(AccessStoreError::MigrationApprovalRequired { found })?;
+    verify_migration_evidence(connection, found, &evidence_path)
+}
+
+fn verify_migration_evidence(
+    connection: &Connection,
+    found: i64,
+    evidence_path: &Path,
+) -> AccessStoreResult<MigrationOperation> {
+    let bytes = std::fs::read(evidence_path)
+        .map_err(|error| invalid_evidence(format!("cannot read evidence: {error}")))?;
+    let evidence: MigrationEvidence = serde_json::from_slice(&bytes)
+        .map_err(|error| invalid_evidence(format!("malformed evidence: {error}")))?;
+    if evidence.schema_version != "labby.access-migration-approval/v1"
+        || evidence.source_version != found
+        || evidence.target_version != SCHEMA_VERSION
+        || evidence.target_fingerprint != SCHEMA_FINGERPRINT
+        || !evidence.activate
+        || evidence.operation_id.trim().is_empty()
+        || evidence.operation_id.len() > 96
+    {
+        return Err(invalid_evidence(
+            "approval does not bind the source, target, fingerprint, operation, and activation decision",
+        ));
+    }
+    if evidence.source_sha256.len() != 64
+        || evidence.checkpoint_sha256.len() != 64
+        || evidence.source_sha256 != evidence.checkpoint_sha256
+        || !evidence
+            .checkpoint_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(invalid_evidence(
+            "source and checkpoint must have the same lowercase SHA-256",
+        ));
+    }
+    let database_path = main_database_path(connection)?;
+    let checkpoint = std::fs::canonicalize(&evidence.checkpoint_path)
+        .map_err(|error| invalid_evidence(format!("cannot resolve checkpoint: {error}")))?;
+    if checkpoint
+        == std::fs::canonicalize(&database_path)
+            .map_err(|error| invalid_evidence(error.to_string()))?
+    {
+        return Err(invalid_evidence(
+            "checkpoint must be an independent rollback artifact",
+        ));
+    }
+    let checkpoint_digest = sha256_file(&checkpoint)?;
+    if checkpoint_digest != evidence.checkpoint_sha256 {
+        return Err(invalid_evidence(
+            "checkpoint digest does not match evidence",
+        ));
+    }
+    if sha256_file(&database_path)? != evidence.source_sha256 {
+        return Err(invalid_evidence(
+            "live source bytes do not match the approved checkpoint",
+        ));
+    }
+    let marker_path = database_path.with_extension(format!("migration-v{SCHEMA_VERSION}.state"));
+    let expected = format!(
+        "prepared\noperation_id={}\ncheckpoint_sha256={}\n",
+        evidence.operation_id, checkpoint_digest
+    );
+    match std::fs::read_to_string(&marker_path) {
+        Ok(existing) if existing == expected => {}
+        Ok(existing) if existing.starts_with("complete\n") => {
+            return Err(invalid_evidence(
+                "completed migration marker exists beside a legacy store",
+            ));
+        }
+        Ok(_) => {
+            return Err(invalid_evidence(
+                "migration marker belongs to different evidence",
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            write_marker(&marker_path, &expected)?;
+        }
+        Err(error) => {
+            return Err(invalid_evidence(format!(
+                "cannot read migration marker: {error}"
+            )));
+        }
+    }
+    Ok(MigrationOperation {
+        marker_path: Some(marker_path),
+        operation_id: evidence.operation_id,
+        checkpoint_sha256: checkpoint_digest,
+    })
+}
+
+fn main_database_path(connection: &Connection) -> AccessStoreResult<PathBuf> {
+    connection
+        .query_row(
+            "SELECT file FROM pragma_database_list WHERE name='main'",
+            [],
+            |row| row.get::<_, String>(0).map(PathBuf::from),
+        )
+        .map_err(super::store::map_sqlite_error)
+}
+
+fn sha256_file(path: &Path) -> AccessStoreResult<String> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| invalid_evidence(format!("cannot read checkpoint: {error}")))?;
+    Ok(hex::encode(Sha256::digest(bytes)))
+}
+
+fn write_marker(path: &Path, contents: &str) -> AccessStoreResult<()> {
+    let temporary = path.with_extension(format!("migration-v{SCHEMA_VERSION}.state.tmp"));
+    std::fs::write(&temporary, contents)
+        .map_err(|error| invalid_evidence(format!("cannot write migration marker: {error}")))?;
+    std::fs::rename(&temporary, path)
+        .map_err(|error| invalid_evidence(format!("cannot publish migration marker: {error}")))
+}
+
+fn complete_migration_operation(operation: &MigrationOperation) -> AccessStoreResult<()> {
+    let Some(marker_path) = &operation.marker_path else {
+        return Ok(());
+    };
+    write_marker(
+        marker_path,
+        &format!(
+            "complete\noperation_id={}\ncheckpoint_sha256={}\ntarget_version={}\ntarget_fingerprint={}\n",
+            operation.operation_id, operation.checkpoint_sha256, SCHEMA_VERSION, SCHEMA_FINGERPRINT
+        ),
+    )
 }
 
 pub(super) fn validate_migratable(connection: &Connection, version: i64) -> AccessStoreResult<()> {
@@ -1336,10 +1522,49 @@ mod credential_migration_tests {
         inventory
     }
 
-    fn snapshot_into(connection: &Connection, path: &std::path::Path) {
+    fn snapshot_into(connection: &Connection, path: &Path) {
         connection
             .execute("VACUUM INTO ?1", [path.to_string_lossy().as_ref()])
             .unwrap();
+    }
+
+    #[test]
+    fn migration_evidence_binds_checkpoint_and_replay_operation() {
+        let directory = super::super::test_support::secure_tempdir();
+        let database_path = directory.path().join("access-v5.db");
+        let checkpoint_path = directory.path().join("access-v5.checkpoint.db");
+        let evidence_path = directory.path().join("approval.json");
+        let source = canonical_v5_schema().unwrap();
+        snapshot_into(&source, &database_path);
+        std::fs::copy(&database_path, &checkpoint_path).unwrap();
+        let checkpoint_sha256 = sha256_file(&checkpoint_path).unwrap();
+        let write_evidence = |operation_id: &str| {
+            std::fs::write(
+                &evidence_path,
+                serde_json::to_vec(&serde_json::json!({
+                    "schema_version": "labby.access-migration-approval/v1",
+                    "operation_id": operation_id,
+                    "source_version": 5,
+                    "target_version": 7,
+                    "target_fingerprint": SCHEMA_FINGERPRINT,
+                    "source_sha256": checkpoint_sha256,
+                    "checkpoint_path": checkpoint_path,
+                    "checkpoint_sha256": checkpoint_sha256,
+                    "activate": true
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        };
+        write_evidence("operation-one");
+        let connection = Connection::open(&database_path).unwrap();
+        let operation = verify_migration_evidence(&connection, 5, &evidence_path).unwrap();
+        assert!(operation.marker_path.as_ref().unwrap().exists());
+        write_evidence("operation-two");
+        assert!(matches!(
+            verify_migration_evidence(&connection, 5, &evidence_path),
+            Err(AccessStoreError::MigrationEvidenceInvalid { .. })
+        ));
     }
 
     #[test]

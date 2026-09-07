@@ -26,7 +26,10 @@ The generated [service catalog](./generated/service-catalog.md) is authoritative
 
 | Service | Product doc | Notes |
 | --- | --- | --- |
+| `access` | [access-control/](./access-control/) | Principals, Teams, Projects, memberships, roles, and effective authority |
+| `agents`, `tasks` | [services/AGENT_TASKS.md](./services/AGENT_TASKS.md) | Owner-scoped Agent definitions, durable Tasks, admission, execution, and revocation |
 | `browser` | [services/BROWSER.md](./services/BROWSER.md) | Rust-native WebMCP browser bridge, pairing, discovery, consent, and bounded invocation |
+| `dev_containers` | [services/DEV_CONTAINERS.md](./services/DEV_CONTAINERS.md) | Owner-scoped development-container definitions, leases, recovery, and lifecycle |
 | `doctor` | [services/DOCTOR.md](./services/DOCTOR.md) | Always-on system, auth, OAuth relay, and proxy diagnostics |
 | `gateway` | [services/GATEWAY.md](./services/GATEWAY.md) | Upstream catalog, protected routes, virtual servers, OAuth, Code Mode host |
 | upstream proxy runtime | [services/UPSTREAM.md](./services/UPSTREAM.md) | HTTP/Unix/stdio upstream MCP connections, discovery, filtering, health, OAuth, skills |
@@ -37,7 +40,7 @@ The generated [service catalog](./generated/service-catalog.md) is authoritative
 | `snippets` | [services/SNIPPETS.md](./services/SNIPPETS.md) | Reusable Code Mode workflow storage, validation, execution, testing, promotion |
 | `artifacts`, `bundles`, `jobs`, `sources`, `uploads` | [services/SKILLS.md](./services/SKILLS.md) and [artifacts/](./artifacts/) | Durable Artifact library, provider-backed control-plane projections, and native Agent Skills projection |
 | `lab_admin` | [services/LAB_ADMIN.md](./services/LAB_ADMIN.md) | Runtime-conditional onboarding audit surface |
-| access owner bootstrap | [services/ACCESS.md](./services/ACCESS.md) | Browser-only explicit creation of the first access-control owner |
+| access owner bootstrap | [services/ACCESS.md](./services/ACCESS.md) | Browser-only explicit creation of the first access-control owner; distinct from the registered `access` service |
 | direct stdio proxy | [guides/STDIO_MCP_PROXY.md](./guides/STDIO_MCP_PROXY.md) | One selected stdio MCP server exposed over Streamable HTTP |
 
 Do not hand-maintain a duplicate action inventory in prose. Use the generated [action catalog](./generated/action-catalog.md) for exact action names, parameters, scopes, destructive classification, and surfaces.

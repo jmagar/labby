@@ -1,0 +1,24 @@
+{
+  "service": "agents",
+  "api_path": "/v1/agents",
+  "cli_probe": null,
+  "can_mutate": true,
+  "success_action": "agents.list",
+  "invalid_action": "schema",
+  "policy_action": "agents.delete",
+  "workflow": ["agents.create", "agents.update", "agents.suspend", "agents.delete"],
+  "parameters": {
+    "action": "agents.list",
+    "agent_id": "matrix-agent",
+    "catalog_generation": "matrix-catalog-generation",
+    "content_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "harness_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "image_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "loadout_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "owner_id": "bootstrap-owner",
+    "owner_kind": "personal",
+    "repository_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "session_id": "matrix-session"
+  },
+  "action_params": {}
+}

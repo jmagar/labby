@@ -351,6 +351,8 @@ fn map_access_error(error: AccessStoreError) -> GatewayLoadoutAssignmentError {
         | AccessStoreError::MissingParent { .. }
         | AccessStoreError::InsecurePermissions { .. }
         | AccessStoreError::UnsupportedSchema { .. }
+        | AccessStoreError::MigrationApprovalRequired { .. }
+        | AccessStoreError::MigrationEvidenceInvalid { .. }
         | AccessStoreError::IntegrityViolation { .. }
         | AccessStoreError::ForeignKeyViolation
         | AccessStoreError::BootstrapConflict

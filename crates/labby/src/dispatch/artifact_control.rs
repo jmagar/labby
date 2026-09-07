@@ -1097,7 +1097,7 @@ mod tests {
             &runtime,
             owner,
             "bootstrap-default",
-            Some("bootstrap-initial-team"),
+            None,
             Permission::AssetDiscover,
         )
         .await

@@ -55,6 +55,18 @@ const SECRET_REFS: ParamSpec = ParamSpec {
     required: false,
     description: "Opaque secret references; secret material is never accepted",
 };
+const CURSOR: ParamSpec = ParamSpec {
+    name: "cursor",
+    ty: "string",
+    required: false,
+    description: "Exclusive instance identifier cursor",
+};
+const LIMIT: ParamSpec = ParamSpec {
+    name: "limit",
+    ty: "string",
+    required: false,
+    description: "Page size from 1 through 100",
+};
 
 const fn action(
     name: &'static str,
@@ -82,7 +94,7 @@ pub(crate) const ACTIONS: &[ActionSpec] = &[
     action(
         "dev_containers.list",
         "List Dev Containers visible to the caller",
-        &[],
+        &[CURSOR, LIMIT],
         false,
     ),
     action(
@@ -127,9 +139,26 @@ pub(crate) fn required_capability(action: &str, _owner: OwnerKind) -> Option<Cap
 /// MCP cannot supply host-established identity/epochs. Refuse without revealing
 /// whether a requested instance exists; authenticated HTTP uses the bound path.
 pub(crate) async fn dispatch_unbound(
-    _action: &str,
-    _params: Value,
+    action: &str,
+    params: Value,
 ) -> Result<Value, crate::dispatch::error::ToolError> {
+    if action == "help" {
+        return Ok(crate::dispatch::helpers::help_payload(
+            "dev_containers",
+            ACTIONS,
+        ));
+    }
+    if action == "schema" {
+        let requested = params
+            .get("action")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| crate::dispatch::error::ToolError::MissingParam {
+                message: "missing required parameter `action`".into(),
+                param: "action".into(),
+            })?;
+        return crate::dispatch::helpers::action_schema(ACTIONS, requested);
+    }
     Err(crate::dispatch::error::ToolError::Forbidden {
         message: "Dev Container operation is not authorized".into(),
         required_scopes: Vec::new(),
@@ -168,21 +197,34 @@ pub(crate) async fn dispatch(
         .store()
         .await
         .map_err(|_| unavailable())?;
-    let inventory = crate::access::recovery_inventory_for_store(&store)
-        .await
-        .map_err(|_| unavailable())?;
     if action == "dev_containers.list" {
-        let mut visible = Vec::new();
-        for record in inventory {
-            let owner = owner_scope(record.owner_kind, &record.owner_id)?;
-            if authorize(&context, &store, action, owner, &record.instance_id)
-                .await
-                .is_ok()
-            {
-                visible.push(record_json(&record));
-            }
-        }
-        return Ok(serde_json::json!({"instances":visible}));
+        let limit = match params.get("limit") {
+            None | Some(Value::Null) => 100,
+            Some(Value::String(value)) => value
+                .parse::<usize>()
+                .ok()
+                .filter(|value| (1..=100).contains(value))
+                .ok_or_else(denied)?,
+            _ => return Err(denied()),
+        };
+        let cursor = params
+            .get("cursor")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let probe_owner = OwnerScope::Installation(
+            InstallationId::new("authorized-list-probe").map_err(|_| denied())?,
+        );
+        let now = now_millis()?;
+        let request =
+            authority_request(&context, action, probe_owner, "authorized-list-probe", now)
+                .map_err(|_| denied())?;
+        let inventory = store
+            .list_authorized_dev_containers(cursor.to_owned(), limit, request)
+            .await
+            .map_err(|_| denied())?;
+        let next_cursor = inventory.last().map(|record| record.instance_id.clone());
+        let visible = inventory.iter().map(record_json).collect::<Vec<_>>();
+        return Ok(serde_json::json!({"instances":visible,"next_cursor":next_cursor}));
     }
     if action == "dev_containers.create" {
         let instance_id = params
@@ -273,6 +315,9 @@ pub(crate) async fn dispatch(
         .get("instance_id")
         .and_then(Value::as_str)
         .ok_or_else(denied)?;
+    let inventory = crate::access::recovery_inventory_for_store(&store)
+        .await
+        .map_err(|_| unavailable())?;
     let record = inventory
         .into_iter()
         .find(|item| item.instance_id == instance_id)
@@ -351,6 +396,27 @@ async fn authorize(
 > {
     let capability = required_capability(action, owner.kind())
         .ok_or(crate::access::AccessStoreError::NotAuthorized)?;
+    let now = now_millis().map_err(|_| crate::access::AccessStoreError::NotAuthorized)?;
+    let lease = crate::access::authorize_action(
+        store,
+        authority_request(context, action, owner.clone(), id, now)?,
+    )
+    .await?;
+    let epochs =
+        crate::access::refresh_authority_epochs(store, context.identity.clone(), owner, capability)
+            .await?;
+    Ok((lease, epochs))
+}
+
+fn authority_request(
+    context: &DevContainerDispatchContext,
+    action: &str,
+    owner: OwnerScope,
+    id: &str,
+    now: u64,
+) -> Result<crate::access::AuthorityRequest, crate::access::AccessStoreError> {
+    let capability = required_capability(action, owner.kind())
+        .ok_or(crate::access::AccessStoreError::NotAuthorized)?;
     let action_ref = ActionRef::new("dev_containers", action)
         .map_err(|_| crate::access::AccessStoreError::MalformedVocabulary)?;
     let resource = ResourceRef::new(
@@ -358,30 +424,21 @@ async fn authorize(
         ResourceFamily::DevContainer,
         ResourceId::new(id).map_err(|_| crate::access::AccessStoreError::MalformedVocabulary)?,
     );
-    let now = now_millis().map_err(|_| crate::access::AccessStoreError::NotAuthorized)?;
-    let lease = crate::access::authorize_action(
-        store,
-        crate::access::AuthorityRequest::new(
-            context.identity.clone(),
-            crate::access::ActionAuthoritySpec::SCHEMA_VERSION,
-            action_ref.clone(),
-            resource,
-            context.ceiling.clone(),
-            None,
-            now,
-            vec![labby_runtime::authority::AuthoritySafeBoundary::BeforeExternalEffect],
-            vec![crate::access::ActionAuthoritySpec::new(
-                action_ref,
-                ResourceFamily::DevContainer,
-                capability,
-            )],
-        ),
-    )
-    .await?;
-    let epochs =
-        crate::access::refresh_authority_epochs(store, context.identity.clone(), owner, capability)
-            .await?;
-    Ok((lease, epochs))
+    Ok(crate::access::AuthorityRequest::new(
+        context.identity.clone(),
+        crate::access::ActionAuthoritySpec::SCHEMA_VERSION,
+        action_ref.clone(),
+        resource,
+        context.ceiling.clone(),
+        None,
+        now,
+        vec![labby_runtime::authority::AuthoritySafeBoundary::BeforeExternalEffect],
+        vec![crate::access::ActionAuthoritySpec::new(
+            action_ref,
+            ResourceFamily::DevContainer,
+            capability,
+        )],
+    ))
 }
 fn owner_scope(kind: OwnerKind, id: &str) -> Result<OwnerScope, crate::dispatch::error::ToolError> {
     Ok(match kind {

@@ -366,6 +366,34 @@ async fn run_server(args: ServeArgs, config: &LabConfig) -> Result<ExitCode> {
             Arc::new(AccessRuntime::blocked_unavailable())
         }
     };
+    // Hermetic live-test binaries need a durable principal behind the static bearer so the
+    // protected API/MCP/CLI adapters exercise their real authority paths. This hook is inert in
+    // release builds and remains explicit in debug builds; production owner bootstrap continues
+    // to require an authenticated browser session.
+    if cfg!(debug_assertions)
+        && std::env::var_os("LABBY_E2E_BOOTSTRAP_STATIC_OWNER").as_deref()
+            == Some(std::ffi::OsStr::new("1"))
+    {
+        let identity = labby_auth::VerifiedIdentity::local_credential(
+            labby_auth::Authenticator::StaticBearer,
+            "static-bearer:primary",
+        )
+        .context("construct live-test static bearer identity")?;
+        access_runtime
+            .bootstrap_owner(
+                crate::access::BootstrapOwnerInput::new(identity, "Local", "Default")
+                    .context("construct live-test owner bootstrap")?,
+            )
+            .await
+            .context("bootstrap live-test static bearer authority")?;
+        access_runtime
+            .store()
+            .await
+            .context("open live-test authority store")?
+            .ensure_agent_task_schemas()
+            .await
+            .context("initialize live-test agent and task schemas")?;
+    }
     let _authority_projection =
         crate::dispatch::depot::authority_projection::start_managed_projection(&config.depot)
             .await

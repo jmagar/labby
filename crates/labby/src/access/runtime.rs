@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -127,6 +128,50 @@ enum RuntimeState {
     Blocked(AccessBlockedReason),
 }
 
+struct DeterministicDevContainerRuntime;
+
+impl labby_runtime::dev_container_runtime::ContainerRuntime for DeterministicDevContainerRuntime {
+    type Error = labby_runtime::dev_container_runtime::DisabledRuntimeError;
+
+    fn create<'a>(
+        &'a self,
+        _: labby_runtime::dev_container_runtime::EngineCreateRequest,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn inspect<'a>(
+        &'a self,
+        _: &'a labby_runtime::dev_container_runtime::EngineHandle,
+    ) -> std::pin::Pin<
+        Box<
+            dyn Future<
+                    Output = Result<labby_runtime::dev_container_runtime::EngineState, Self::Error>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async { Ok(labby_runtime::dev_container_runtime::EngineState::Running) })
+    }
+    fn start<'a>(
+        &'a self,
+        _: &'a labby_runtime::dev_container_runtime::EngineHandle,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn stop<'a>(
+        &'a self,
+        _: &'a labby_runtime::dev_container_runtime::EngineHandle,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn destroy<'a>(
+        &'a self,
+        _: &'a labby_runtime::dev_container_runtime::EngineHandle,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
 /// Process-scoped owner of the access-store lifecycle.
 ///
 /// Construction is observational: it never creates or migrates the store. Only the explicit
@@ -242,13 +287,22 @@ impl AccessRuntime {
             tracing::warn!(?reason, "access runtime initialization blocked");
             state = RuntimeState::Blocked(reason);
         }
+        let dev_container_runtime: Arc<
+            dyn labby_runtime::dev_container_runtime::ContainerRuntime<
+                    Error = labby_runtime::dev_container_runtime::DisabledRuntimeError,
+                >,
+        > = if cfg!(debug_assertions)
+            && std::env::var_os("LABBY_E2E_DETERMINISTIC_EXECUTORS").is_some()
+        {
+            Arc::new(DeterministicDevContainerRuntime)
+        } else {
+            Arc::new(labby_runtime::dev_container_runtime::DisabledContainerRuntime)
+        };
         Self {
             path: Arc::new(path),
             state: Arc::new(Mutex::new(state)),
             bootstrap_writer: Arc::new(Semaphore::new(1)),
-            dev_container_runtime: Arc::new(
-                labby_runtime::dev_container_runtime::DisabledContainerRuntime,
-            ),
+            dev_container_runtime,
         }
     }
 
@@ -271,6 +325,10 @@ impl AccessRuntime {
                 Error = labby_runtime::dev_container_runtime::DisabledRuntimeError,
             >,
     > {
+        if cfg!(debug_assertions) && std::env::var_os("LABBY_E2E_DETERMINISTIC_EXECUTORS").is_some()
+        {
+            return Arc::new(DeterministicDevContainerRuntime);
+        }
         Arc::clone(&self.dev_container_runtime)
     }
 
@@ -714,6 +772,8 @@ fn blocked_reason(error: &AccessStoreError) -> AccessBlockedReason {
         | AccessStoreError::MalformedVocabulary
         | AccessStoreError::ForeignKeyViolation => AccessBlockedReason::Corrupt,
         AccessStoreError::UnsupportedSchema { .. } => AccessBlockedReason::NewerSchema,
+        AccessStoreError::MigrationApprovalRequired { .. } => AccessBlockedReason::Unavailable,
+        AccessStoreError::MigrationEvidenceInvalid { .. } => AccessBlockedReason::Unavailable,
         AccessStoreError::Locked => AccessBlockedReason::Locked,
         AccessStoreError::ReadOnly => AccessBlockedReason::ReadOnly,
         AccessStoreError::DiskFull

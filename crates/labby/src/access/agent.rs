@@ -43,7 +43,23 @@ impl AgentDefinitionStore {
             .map_err(|_| AccessStoreError::MalformedVocabulary)?;
         let (owner_kind, owner_id) = owner(&definition.owner);
         let state = state(definition.state);
-        let payload = serde_json::json!({"agentId": definition.id, "catalogGeneration": definition.revision.catalog_generation, "contentDigest": definition.revision.content_digest, "repositoryDigest": definition.revision.repository_digest, "imageDigest": definition.revision.image_digest, "harnessDigest": definition.revision.harness_digest, "loadoutDigest": definition.revision.loadout_digest, "credentialReferences": definition.revision.credential_references}).to_string();
+        let payload = serde_json::json!({
+            "schemaVersion": 1,
+            "agentId": definition.id,
+            "catalogGeneration": definition.revision.catalog_generation,
+            "contentDigest": definition.revision.content_digest,
+            "repositoryDigest": definition.revision.repository_digest,
+            "imageDigest": definition.revision.image_digest,
+            "harnessDigest": definition.revision.harness_digest,
+            "loadoutDigest": definition.revision.loadout_digest,
+            "credentialReferences": definition.revision.credential_references,
+            "capabilitySchemaVersion": labby_primitives::access::Capability::SCHEMA_VERSION.get(),
+            "requiredCapabilities": definition.required_capabilities.iter().map(|value| value.as_wire()).collect::<Vec<_>>(),
+            "revocationPolicy": match definition.revocation_policy {
+                labby_primitives::agent::RunningRevocationPolicy::StopAtSafeBoundary => "stop_at_safe_boundary",
+                labby_primitives::agent::RunningRevocationPolicy::StopImmediately => "stop_immediately",
+            },
+        }).to_string();
         let changed = tx.execute("INSERT INTO agent_definitions VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(agent_id) DO UPDATE SET version=excluded.version,definition_json=excluded.definition_json,state=excluded.state,authority_epoch=excluded.authority_epoch,publication_epoch=excluded.publication_epoch,updated_at=excluded.updated_at WHERE excluded.version=agent_definitions.version+1 AND excluded.owner_kind=agent_definitions.owner_kind AND excluded.owner_id=agent_definitions.owner_id", params![definition.id,owner_kind,owner_id,i64::try_from(definition.revision.version).map_err(|_|AccessStoreError::MalformedVocabulary)?,payload,state,i64::try_from(definition.authority_epoch).map_err(|_|AccessStoreError::MalformedVocabulary)?,i64::try_from(definition.publication_epoch).map_err(|_|AccessStoreError::MalformedVocabulary)?,now]).map_err(super::store::map_sqlite_error)?;
         if changed != 1 {
             return Err(AccessStoreError::IntegrityViolation {
@@ -74,10 +90,23 @@ impl AgentDefinitionStore {
         self.connection.query_row("SELECT owner_kind,owner_id,version,definition_json,state,authority_epoch,publication_epoch FROM agent_definitions WHERE agent_id=?1 AND state!='deleted'", [id], decode).optional().map_err(super::store::map_sqlite_error)
     }
 
-    pub(crate) fn list(&self) -> AccessStoreResult<Vec<AgentDefinition>> {
-        let mut statement = self.connection.prepare("SELECT owner_kind,owner_id,version,definition_json,state,authority_epoch,publication_epoch FROM agent_definitions WHERE state!='deleted' ORDER BY owner_kind,owner_id,agent_id").map_err(super::store::map_sqlite_error)?;
+    pub(crate) fn list_page(
+        &self,
+        after: &str,
+        limit: usize,
+    ) -> AccessStoreResult<Vec<AgentDefinition>> {
+        if limit == 0 || limit > 100 {
+            return Err(AccessStoreError::MalformedVocabulary);
+        }
+        let mut statement = self.connection.prepare("SELECT owner_kind,owner_id,version,definition_json,state,authority_epoch,publication_epoch FROM agent_definitions WHERE state!='deleted' AND agent_id>?1 ORDER BY agent_id LIMIT ?2").map_err(super::store::map_sqlite_error)?;
         statement
-            .query_map([], decode)
+            .query_map(
+                params![
+                    after,
+                    i64::try_from(limit).map_err(|_| AccessStoreError::MalformedVocabulary)?
+                ],
+                decode,
+            )
             .map_err(super::store::map_sqlite_error)?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(super::store::map_sqlite_error)
@@ -195,7 +224,7 @@ impl AgentDefinitionStore {
     }
 }
 
-fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentDefinition> {
+pub(super) fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentDefinition> {
     use labby_primitives::access::{InstallationId, PrincipalId, ProjectId, TeamId};
     use labby_primitives::agent::{AgentRevision, RunningRevocationPolicy};
     let kind: String = row.get(0)?;
@@ -204,12 +233,51 @@ fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentDefinition> {
     let value: serde_json::Value = serde_json::from_str(&payload).map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(3, rusqlite::types::Type::Text, Box::new(error))
     })?;
-    let string = |key: &str| {
+    let string = |key: &str| -> rusqlite::Result<String> {
         value
             .get(key)
             .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_owned()
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .ok_or(rusqlite::Error::InvalidQuery)
+    };
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        != Some(1)
+        || value
+            .get("capabilitySchemaVersion")
+            .and_then(serde_json::Value::as_u64)
+            != Some(u64::from(
+                labby_primitives::access::Capability::SCHEMA_VERSION.get(),
+            ))
+    {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    let required_capabilities = value
+        .get("requiredCapabilities")
+        .and_then(serde_json::Value::as_array)
+        .ok_or(rusqlite::Error::InvalidQuery)?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .and_then(|value| {
+                    labby_primitives::access::Capability::from_wire(
+                        labby_primitives::access::Capability::SCHEMA_VERSION,
+                        value,
+                    )
+                })
+                .ok_or(rusqlite::Error::InvalidQuery)
+        })
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let revocation_policy = match value
+        .get("revocationPolicy")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("stop_at_safe_boundary") => RunningRevocationPolicy::StopAtSafeBoundary,
+        Some("stop_immediately") => RunningRevocationPolicy::StopImmediately,
+        _ => return Err(rusqlite::Error::InvalidQuery),
     };
     let owner = match kind.as_str() {
         "installation" => OwnerScope::Installation(
@@ -224,38 +292,47 @@ fn decode(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentDefinition> {
         }
         _ => return Err(rusqlite::Error::InvalidQuery),
     };
-    Ok(AgentDefinition {
-        id: string("agentId"),
+    let definition = AgentDefinition {
+        id: string("agentId")?,
         owner,
         revision: AgentRevision {
             version: u64::try_from(row.get::<_, i64>(2)?)
                 .map_err(|_| rusqlite::Error::InvalidQuery)?,
-            content_digest: string("contentDigest"),
-            repository_digest: string("repositoryDigest"),
-            image_digest: string("imageDigest"),
-            harness_digest: string("harnessDigest"),
-            loadout_digest: string("loadoutDigest"),
-            catalog_generation: string("catalogGeneration"),
+            content_digest: string("contentDigest")?,
+            repository_digest: string("repositoryDigest")?,
+            image_digest: string("imageDigest")?,
+            harness_digest: string("harnessDigest")?,
+            loadout_digest: string("loadoutDigest")?,
+            catalog_generation: string("catalogGeneration")?,
             credential_references: value
                 .get("credentialReferences")
                 .and_then(serde_json::Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|v| v.as_str().map(ToOwned::to_owned))
-                .collect(),
+                .ok_or(rusqlite::Error::InvalidQuery)?
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(ToOwned::to_owned)
+                        .ok_or(rusqlite::Error::InvalidQuery)
+                })
+                .collect::<rusqlite::Result<Vec<_>>>()?,
         },
         state: match row.get::<_, String>(4)?.as_str() {
             "active" => AgentState::Active,
             "suspended" => AgentState::Suspended,
             _ => AgentState::Deleted,
         },
-        required_capabilities: vec![],
+        required_capabilities,
         authority_epoch: u64::try_from(row.get::<_, i64>(5)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         publication_epoch: u64::try_from(row.get::<_, i64>(6)?)
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
-        revocation_policy: RunningRevocationPolicy::StopAtSafeBoundary,
-    })
+        revocation_policy,
+    };
+    definition
+        .validate()
+        .map_err(|_| rusqlite::Error::InvalidQuery)?;
+    Ok(definition)
 }
 
 fn owner(owner: &OwnerScope) -> (&'static str, &str) {
@@ -314,6 +391,8 @@ mod tests {
         assert!(store.put(&definition(4), "p-1", 3).is_err());
         let counts:(i64,i64)=store.connection.query_row("SELECT (SELECT count(*) FROM agent_definitions),(SELECT count(*) FROM agent_definition_audit)",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
         assert_eq!(counts, (1, 2));
+        assert_eq!(store.get("agent-1").unwrap(), Some(definition(2)));
+        assert_eq!(store.list_page("", 100).unwrap(), vec![definition(2)]);
         let current = definition(2);
         store
             .create_session("session-1", &current, "p-1", "authority-1", 100, 4)
@@ -323,5 +402,17 @@ mod tests {
             Some("admitted".to_owned())
         );
         assert_eq!(store.session_status("agent-1", "guessed").unwrap(), None);
+    }
+
+    #[test]
+    fn legacy_or_malformed_security_definition_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = AgentDefinitionStore::open(&dir.path().join("agents.db")).unwrap();
+        store.put(&definition(1), "p-1", 1).unwrap();
+        store.connection.execute(
+            "UPDATE agent_definitions SET definition_json=json_remove(definition_json,'$.requiredCapabilities') WHERE agent_id='agent-1'",
+            [],
+        ).unwrap();
+        assert!(store.get("agent-1").is_err());
     }
 }

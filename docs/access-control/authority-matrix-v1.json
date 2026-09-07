@@ -14,6 +14,7 @@
   },
   "resourceFamilies": {
     "artifact_library": {"ownerScopes": ["team", "project", "personal"]},
+    "access_control": {"ownerScopes": ["installation", "team", "project", "personal"]},
     "browser_runtime": {"ownerScopes": ["team", "project", "personal"]},
     "bundle": {"ownerScopes": ["team", "project", "personal"]},
     "diagnostics": {"ownerScopes": ["installation"]},
@@ -33,9 +34,12 @@
   },
   "serviceClassifications": [
     {"service": "artifacts", "resourceFamily": "artifact_library", "readCapability": "scope.read", "operateCapability": "scope.operate", "manageCapability": "scope.manage"},
+    {"service": "access", "resourceFamily": "access_control", "readCapability": "scope.read", "operateCapability": "scope.operate", "manageCapability": "membership.manage"},
+    {"service": "agents", "resourceFamily": "agent", "readCapability": "scope.read", "operateCapability": "scope.operate", "manageCapability": "scope.manage"},
     {"service": "browser", "resourceFamily": "browser_runtime", "readCapability": "scope.read", "operateCapability": "scope.operate", "manageCapability": "scope.manage"},
     {"service": "bundles", "resourceFamily": "bundle", "readCapability": "scope.read", "operateCapability": "scope.operate", "manageCapability": "scope.manage"},
     {"service": "doctor", "resourceFamily": "diagnostics", "readCapability": "platform.read", "operateCapability": "platform.manage", "manageCapability": "platform.manage"},
+    {"service": "dev_containers", "resourceFamily": "dev_container", "readCapability": "scope.read", "operateCapability": "scope.operate", "manageCapability": "scope.manage"},
     {"service": "fs", "resourceFamily": "filesystem", "readCapability": "platform.read", "operateCapability": "platform.manage", "manageCapability": "platform.manage"},
     {"service": "gateway", "resourceFamily": "gateway", "readCapability": "scope.read", "operateCapability": "scope.operate", "manageCapability": "scope.manage"},
     {"service": "jobs", "resourceFamily": "job", "readCapability": "scope.read", "operateCapability": "scope.operate", "manageCapability": "scope.manage"},
@@ -44,12 +48,9 @@
     {"service": "setup", "resourceFamily": "setup", "readCapability": "platform.read", "operateCapability": "platform.manage", "manageCapability": "platform.manage"},
     {"service": "snippets", "resourceFamily": "snippet", "readCapability": "scope.read", "operateCapability": "scope.operate", "manageCapability": "scope.manage"},
     {"service": "sources", "resourceFamily": "source", "readCapability": "scope.read", "operateCapability": "scope.operate", "manageCapability": "scope.manage"},
+    {"service": "stash", "resourceFamily": "stash", "readCapability": "scope.read", "operateCapability": "scope.operate", "manageCapability": "scope.manage"},
+    {"service": "tasks", "resourceFamily": "task", "readCapability": "scope.read", "operateCapability": "scope.operate", "manageCapability": "scope.manage"},
     {"service": "uploads", "resourceFamily": "upload", "readCapability": "scope.read", "operateCapability": "scope.operate", "manageCapability": "scope.manage"}
   ],
-  "futureServiceClassifications": [
-    {"service": "stash", "resourceFamily": "stash"},
-    {"service": "agents", "resourceFamily": "agent"},
-    {"service": "tasks", "resourceFamily": "task"},
-    {"service": "dev_containers", "resourceFamily": "dev_container"}
-  ]
+  "futureServiceClassifications": []
 }

@@ -288,10 +288,11 @@ precedence and path contract.
 
 Feature-gated product slices are `gateway` and `fs`. The supported always-on
 operator services are `doctor`, `server_logs`, `setup`, and `snippets`;
-`lab_admin` is runtime-conditional. The approved principal-scoped File Stash
-contract reserves owned local state for eventual `gateway-host` composition; it
-is not registered yet and is not a separate Cargo feature. Qualification must
-promote it into current-service documentation only after implementation.
+`lab_admin` is runtime-conditional. The principal-scoped File Stash is
+registered as runtime-conditional default `gateway-host` functionality on Linux
+and Android. Unsupported platforms omit it because they lack the sanctioned
+descriptor-relative filesystem implementation. It is not a separate Cargo
+feature.
 Retired ACP, Registry-browser, Marketplace, Fleet/device runtime, Deploy-product,
 and Agent Artifact Manager implementations are deleted rather than retained as
 sleeping aliases. File Stash must not restore their component, revision,

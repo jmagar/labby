@@ -21,6 +21,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_gateway_credential_bind",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -57,6 +58,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_gateway_credential_list",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -91,6 +93,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_gateway_credential_revoke",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -126,6 +129,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_platform_admin_grant",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -160,6 +164,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_platform_admin_revoke",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -194,6 +199,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_project_effective_list",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -226,6 +232,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_team_activate",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -260,6 +267,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_team_create",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -295,6 +303,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_team_list",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -327,6 +336,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_team_member_add",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -363,6 +373,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_team_member_remove",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -398,6 +409,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_team_member_role_set",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -434,6 +446,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_team_member_suspend",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -469,6 +482,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_team_suspend",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -503,6 +517,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_team_invitation_accept",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -537,6 +552,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_team_invitation_create",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -575,6 +591,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::access::access_team_project_assign",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_access_workflow",
@@ -677,6 +694,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::agents::agents_create",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_agents_workflow",
@@ -719,6 +737,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::agents::agents_delete",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_agents_workflow",
@@ -753,6 +772,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::agents::agents_get",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_agents_workflow",
@@ -787,6 +807,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::agents::agents_list",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_agents_workflow",
@@ -819,6 +840,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::agents::agents_run",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_agents_workflow",
@@ -853,6 +875,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::agents::agents_session_status",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_agents_workflow",
@@ -888,6 +911,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::agents::agents_suspend",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_agents_workflow",
@@ -922,6 +946,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::agents::agents_update",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_agents_workflow",
@@ -1022,6 +1047,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::dev_containers::dev_containers_create",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_dev_containers_workflow",
@@ -1059,6 +1085,7 @@
     "scenario_kind": "destructive_isolated",
     "scenario_id": "destructive_isolated::dev_containers::dev_containers_destroy",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_dev_containers_destructive",
@@ -1093,6 +1120,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::dev_containers::dev_containers_list",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_dev_containers_workflow",
@@ -1125,6 +1153,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::dev_containers::dev_containers_reconcile",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_dev_containers_workflow",
@@ -1159,6 +1188,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::dev_containers::dev_containers_start",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_dev_containers_workflow",
@@ -1193,6 +1223,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::dev_containers::dev_containers_stop",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_dev_containers_workflow",
@@ -1359,6 +1390,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::tasks::tasks_cancel",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_tasks_workflow",
@@ -1393,6 +1425,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::tasks::tasks_create",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_tasks_workflow",
@@ -1432,6 +1465,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::tasks::tasks_get",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_tasks_workflow",
@@ -1466,6 +1500,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::tasks::tasks_list",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_tasks_workflow",
@@ -1498,6 +1533,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::tasks::tasks_queue",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_tasks_workflow",
@@ -1532,6 +1568,7 @@
     "scenario_kind": "stateful_scenario",
     "scenario_id": "stateful_scenario::tasks::tasks_result",
     "minimum_evidence": "cross_surface_parity",
+    "api_minimum": "live_state_transition",
     "setup_ref": "disposable-home",
     "fixture_params": {
       "fixture": "isolated_tasks_workflow",

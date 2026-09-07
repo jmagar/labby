@@ -209,6 +209,7 @@ pub(super) fn build_action_catalog(services: &[RegisteredService]) -> Vec<Action
         }
         for action in service_actions {
             let action_surfaces = action_surfaces(service.name, action.name, &surfaces);
+            let authority = authority_metadata(service.name, action.name, action.requires_admin);
             actions.push(ActionDoc {
                 service: service.name.to_string(),
                 action: action.name.to_string(),
@@ -220,6 +221,9 @@ pub(super) fn build_action_catalog(services: &[RegisteredService]) -> Vec<Action
                 } else {
                     Vec::new()
                 },
+                authorization_boundary: authority.boundary.to_string(),
+                required_capability: authority.capability.map(str::to_string),
+                resource_family: authority.resource_family.map(str::to_string),
                 params: action
                     .params
                     .iter()
@@ -396,6 +400,45 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn action_catalog_exposes_structured_resource_authority_when_dispatch_has_it() {
+        let registry = crate::registry::build_docs_registry();
+        let actions = build_action_catalog(registry.services());
+        for (service, action, capability, family) in [
+            ("access", "access.team.create", "scope.create", "platform"),
+            ("agents", "agents.delete", "scope.delete", "agent"),
+            ("tasks", "tasks.result", "scope.read", "task"),
+            (
+                "dev_containers",
+                "dev_containers.reconcile",
+                "scope.operate",
+                "dev_container",
+            ),
+        ] {
+            let projected = actions
+                .iter()
+                .find(|item| item.service == service && item.action == action)
+                .unwrap_or_else(|| panic!("missing {service}.{action}"));
+            assert_eq!(projected.authorization_boundary, "resource_capability");
+            assert_eq!(projected.required_capability.as_deref(), Some(capability));
+            assert_eq!(projected.resource_family.as_deref(), Some(family));
+        }
+    }
+
+    #[test]
+    fn ownership_authority_is_not_misreported_as_transport_admin() {
+        let registry = crate::registry::build_docs_registry();
+        let actions = build_action_catalog(registry.services());
+        let stash = actions
+            .iter()
+            .find(|item| item.service == "stash" && item.action == "stash.metadata")
+            .expect("stash.metadata action");
+        assert_eq!(stash.authorization_boundary, "principal_ownership_or_grant");
+        assert_eq!(stash.required_capability, None);
+        assert_eq!(stash.resource_family, None);
+        assert!(!stash.requires_admin);
+    }
 }
 
 fn auth_posture(service: &str, action: &str, requires_admin: bool) -> String {
@@ -405,6 +448,80 @@ fn auth_posture(service: &str, action: &str, requires_admin: bool) -> String {
         "requires lab:admin in addition to the selected transport authentication".to_string()
     } else {
         "uses the selected transport auth and gateway visibility policy".to_string()
+    }
+}
+
+#[derive(Clone, Copy)]
+struct AuthorityMetadata {
+    boundary: &'static str,
+    capability: Option<&'static str>,
+    resource_family: Option<&'static str>,
+}
+
+fn authority_metadata(service: &str, action: &str, requires_admin: bool) -> AuthorityMetadata {
+    if requires_admin {
+        return AuthorityMetadata {
+            boundary: "transport_admin",
+            capability: None,
+            resource_family: None,
+        };
+    }
+
+    let capability = match (service, action) {
+        ("access", "access.team.create") => Some("scope.create"),
+        ("access", "access.team_invitation.accept") => Some("scope.operate"),
+        ("access", action) if action.starts_with("access.platform_admin.") => {
+            Some("platform.manage")
+        }
+        ("access", "access.team.list" | "access.project.effective.list") => None,
+        ("access", action) if action.ends_with(".list") => Some("scope.read"),
+        ("access", action)
+            if action.starts_with("access.gateway_credential.")
+                || action == "access.team_project.assign" =>
+        {
+            Some("scope.manage")
+        }
+        ("access", _) => Some("membership.manage"),
+        ("agents", "agents.create") => Some("scope.create"),
+        ("agents", "agents.list" | "agents.get" | "agents.session.status") => Some("scope.read"),
+        ("agents", "agents.run") => Some("scope.operate"),
+        ("agents", "agents.delete") => Some("scope.delete"),
+        ("agents", "agents.update" | "agents.suspend") => Some("scope.manage"),
+        ("tasks", "tasks.create") => Some("scope.create"),
+        ("tasks", "tasks.list" | "tasks.get" | "tasks.result") => Some("scope.read"),
+        ("tasks", "tasks.queue" | "tasks.cancel") => Some("scope.operate"),
+        ("dev_containers", "dev_containers.list") => Some("scope.read"),
+        ("dev_containers", "dev_containers.create") => Some("scope.create"),
+        ("dev_containers", "dev_containers.destroy") => Some("scope.delete"),
+        (
+            "dev_containers",
+            "dev_containers.start" | "dev_containers.stop" | "dev_containers.reconcile",
+        ) => Some("scope.operate"),
+        _ => None,
+    };
+    let resource_family = match service {
+        "access" if capability.is_some() => Some("platform"),
+        "agents" if capability.is_some() => Some("agent"),
+        "tasks" if capability.is_some() => Some("task"),
+        "dev_containers" if capability.is_some() => Some("dev_container"),
+        _ => None,
+    };
+    AuthorityMetadata {
+        boundary: if capability.is_some() {
+            "resource_capability"
+        } else if service == "access"
+            && matches!(action, "access.team.list" | "access.project.effective.list")
+        {
+            "caller_membership_projection"
+        } else if service == "stash" {
+            "principal_ownership_or_grant"
+        } else if service == "projects" {
+            "team_project_membership"
+        } else {
+            "transport"
+        },
+        capability,
+        resource_family,
     }
 }
 
@@ -434,6 +551,9 @@ fn builtin_action(
         destructive: false,
         requires_admin: false,
         required_scopes: Vec::new(),
+        authorization_boundary: "transport".to_string(),
+        required_capability: None,
+        resource_family: None,
         params,
         returns: if action == "schema" {
             "ActionSpec".to_string()

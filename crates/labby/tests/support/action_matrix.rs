@@ -24,6 +24,8 @@ pub(crate) struct CaseIntent {
     pub(crate) scenario_kind: ScenarioKind,
     pub(crate) scenario_id: String,
     pub(crate) minimum_evidence: EvidenceLevel,
+    #[serde(default)]
+    pub(crate) api_minimum: Option<EvidenceLevel>,
     pub(crate) persistence_class: PersistenceClass,
     pub(crate) scenario_owner: ScenarioOwner,
     pub(crate) setup_ref: String,
@@ -276,6 +278,16 @@ pub(crate) fn validate_intent_shape(intent: &CaseIntent) -> Vec<String> {
     }
     if intent.applicable_features.is_empty() {
         errors.push(format!("{key}: applicable_features is empty"));
+    }
+    if let Some(api_minimum) = intent.api_minimum {
+        if !intent.applicable_surfaces.contains(&Surface::Api) {
+            errors.push(format!("{key}: api_minimum requires the API surface"));
+        }
+        if api_minimum > intent.minimum_evidence {
+            errors.push(format!(
+                "{key}: api_minimum cannot exceed the aggregate minimum"
+            ));
+        }
     }
     if intent.required
         && matches!(

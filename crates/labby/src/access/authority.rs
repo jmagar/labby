@@ -81,6 +81,7 @@ impl AuthorityCeiling {
 }
 
 /// Exact action/resource request. The registry is trusted product metadata, not caller input.
+#[derive(Clone)]
 pub(crate) struct AuthorityRequest {
     identity: VerifiedIdentity,
     action_schema_version: u16,
@@ -117,6 +118,16 @@ impl AuthorityRequest {
             safe_boundaries,
             registry,
         }
+    }
+
+    pub(crate) fn identity(&self) -> &VerifiedIdentity {
+        &self.identity
+    }
+
+    pub(crate) fn for_resource(&self, resource: ResourceRef) -> Self {
+        let mut request = self.clone();
+        request.resource = resource;
+        request
     }
 }
 
@@ -297,7 +308,9 @@ fn resolve_authority(
                     params![principal.id, team_id.as_str()],
                     |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<i64>>(5)?)),
                 ).optional().map_err(map_sqlite_error)?.ok_or(AccessStoreError::NotAuthorized)?;
-            if row.1 != "active" {
+            // Platform administrators retain recovery authority over suspended teams so they can
+            // reactivate them. Ordinary membership authority remains fail-closed while suspended.
+            if row.1 != "active" && !(is_platform_admin && row.1 == "suspended") {
                 return Err(AccessStoreError::NotAuthorized);
             }
             let (role, membership_epoch) = if is_platform_admin {

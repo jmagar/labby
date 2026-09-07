@@ -3,7 +3,10 @@ use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, TransactionB
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 use tokio::sync::Semaphore;
@@ -111,12 +114,68 @@ impl FileStashStoreError {
 #[derive(Clone)]
 pub(crate) struct FileStashStore {
     connection: Arc<Mutex<Connection>>,
+    readers: Arc<Vec<Mutex<Connection>>>,
+    reader_cursor: Arc<AtomicUsize>,
+    reader_admission: Arc<Semaphore>,
     admission: Arc<Semaphore>,
     queue: Arc<Semaphore>,
     admission_timeout: Duration,
     path: Arc<PathBuf>,
 }
 impl FileStashStore {
+    pub(crate) async fn begin_recovery(&self) -> Result<String> {
+        self.with_connection(|connection| {
+            let tx = connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(FileStashStoreError::sqlite)?;
+            let (phase, cursor): (String, String) = tx
+                .query_row(
+                    "SELECT phase,cursor FROM stash_recovery WHERE singleton=1",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(FileStashStoreError::sqlite)?;
+            let cursor = if phase == "complete" {
+                tx.execute(
+                    "UPDATE stash_recovery SET phase='pending',cursor='',updated_at=unixepoch() WHERE singleton=1",
+                    [],
+                )
+                .map_err(FileStashStoreError::sqlite)?;
+                String::new()
+            } else {
+                cursor
+            };
+            tx.commit().map_err(FileStashStoreError::sqlite)?;
+            Ok(cursor)
+        })
+        .await
+    }
+
+    pub(crate) async fn checkpoint_recovery(&self, cursor: String) -> Result<()> {
+        self.with_connection(move |connection| {
+            connection
+                .execute(
+                    "UPDATE stash_recovery SET cursor=?1,updated_at=unixepoch() WHERE singleton=1 AND phase='pending'",
+                    [&cursor],
+                )
+                .map_err(FileStashStoreError::sqlite)?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub(crate) async fn complete_recovery(&self) -> Result<()> {
+        self.with_connection(|connection| {
+            connection
+                .execute(
+                    "UPDATE stash_recovery SET phase='complete',cursor='',updated_at=unixepoch() WHERE singleton=1",
+                    [],
+                )
+                .map_err(FileStashStoreError::sqlite)?;
+            Ok(())
+        })
+        .await
+    }
     pub(super) async fn open(path: PathBuf, snapshot_id: String) -> Result<Self> {
         Self::open_with_limits(path, snapshot_id, 64, ADMISSION_TIMEOUT).await
     }
@@ -131,13 +190,51 @@ impl FileStashStore {
         let connection = tokio::task::spawn_blocking(move || open_connection(&p, &snapshot_id))
             .await
             .map_err(|_| FileStashStoreError::Unavailable)??;
+        let reader_path = path.clone();
+        let readers = tokio::task::spawn_blocking(move || {
+            (0..4)
+                .map(|_| open_read_connection(&reader_path).map(Mutex::new))
+                .collect::<Result<Vec<_>>>()
+        })
+        .await
+        .map_err(|_| FileStashStoreError::Unavailable)??;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
+            readers: Arc::new(readers),
+            reader_cursor: Arc::new(AtomicUsize::new(0)),
+            reader_admission: Arc::new(Semaphore::new(4)),
             admission: Arc::new(Semaphore::new(1)),
             queue: Arc::new(Semaphore::new(queue_capacity)),
             admission_timeout,
             path: Arc::new(path),
         })
+    }
+    pub(super) async fn with_read_connection<T: Send + 'static>(
+        &self,
+        op: impl FnOnce(&Connection) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let queued = Arc::clone(&self.queue)
+            .try_acquire_owned()
+            .map_err(|_| FileStashStoreError::Busy)?;
+        let permit = tokio::time::timeout(
+            self.admission_timeout,
+            Arc::clone(&self.reader_admission).acquire_owned(),
+        )
+        .await
+        .map_err(|_| FileStashStoreError::Busy)?
+        .map_err(|_| FileStashStoreError::Unavailable)?;
+        let readers = Arc::clone(&self.readers);
+        let index = self.reader_cursor.fetch_add(1, Ordering::Relaxed) % readers.len();
+        tokio::task::spawn_blocking(move || {
+            let _queued = queued;
+            let _permit = permit;
+            let connection = readers[index]
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            op(&connection)
+        })
+        .await
+        .map_err(|_| FileStashStoreError::Unavailable)?
     }
     pub(super) async fn with_connection<T: Send + 'static>(
         &self,
@@ -182,6 +279,7 @@ impl FileStashStore {
     pub(super) fn close(&self) {
         self.queue.close();
         self.admission.close();
+        self.reader_admission.close();
     }
 
     pub(crate) async fn reserve_upload(
@@ -202,14 +300,14 @@ impl FileStashStore {
                 .map_err(FileStashStoreError::sqlite)?;
             let (principal_committed, principal_reserved, live_files, pending_files): (i64, i64, i64, i64) = tx
                 .query_row(
-                    "SELECT COALESCE((SELECT SUM(size_bytes) FROM files WHERE owner_principal_id=?1 AND ready=1),0),COALESCE((SELECT SUM(reserved_bytes) FROM pending_uploads WHERE owner_principal_id=?1),0),COALESCE((SELECT COUNT(*) FROM files WHERE owner_principal_id=?1 AND ready=1),0),COALESCE((SELECT COUNT(*) FROM pending_uploads WHERE owner_principal_id=?1),0)",
+                    "SELECT committed_bytes,reserved_bytes,live_files,pending_files FROM stash_usage WHERE owner_principal_id=?1 UNION ALL SELECT 0,0,0,0 LIMIT 1",
                     [&owner],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )
                 .map_err(FileStashStoreError::sqlite)?;
             let instance_used: i64 = tx
                 .query_row(
-                    "SELECT COALESCE((SELECT SUM(size_bytes) FROM files WHERE ready=1),0)+COALESCE((SELECT SUM(reserved_bytes) FROM pending_uploads),0)",
+                    "SELECT committed_bytes+reserved_bytes FROM stash_instance_usage WHERE singleton=1",
                     [],
                     |row| row.get(0),
                 )
@@ -289,9 +387,9 @@ impl FileStashStore {
     }
 
     pub(crate) async fn usage(&self, owner: String) -> Result<StashUsage> {
-        self.with_connection(move |connection| {
+        self.with_read_connection(move |connection| {
             connection.query_row(
-                "SELECT COALESCE((SELECT SUM(size_bytes) FROM files WHERE owner_principal_id=?1 AND ready=1),0),COALESCE((SELECT SUM(reserved_bytes) FROM pending_uploads WHERE owner_principal_id=?1),0),COALESCE((SELECT COUNT(*) FROM files WHERE owner_principal_id=?1 AND ready=1),0),COALESCE((SELECT COUNT(*) FROM files f WHERE f.owner_principal_id=?1 AND f.ready=1 AND EXISTS(SELECT 1 FROM grants g WHERE g.file_id=f.file_id AND g.state='active')),0)",
+                "SELECT COALESCE((SELECT committed_bytes FROM stash_usage WHERE owner_principal_id=?1),0),COALESCE((SELECT reserved_bytes FROM stash_usage WHERE owner_principal_id=?1),0),COALESCE((SELECT live_files FROM stash_usage WHERE owner_principal_id=?1),0),COALESCE((SELECT COUNT(*) FROM files f WHERE f.owner_principal_id=?1 AND f.ready=1 AND EXISTS(SELECT 1 FROM grants g WHERE g.file_id=f.file_id AND g.state='active')),0)",
                 [&owner],
                 |r| Ok(StashUsage { committed_bytes: r.get::<_, i64>(0)? as u64, reserved_bytes: r.get::<_, i64>(1)? as u64, live_files: r.get::<_, i64>(2)? as u64, owned_shared_file_count: r.get::<_, i64>(3)? as u64 }),
             ).map_err(FileStashStoreError::sqlite)
@@ -305,7 +403,7 @@ impl FileStashStore {
         after: Option<StashCursor>,
         limit: usize,
     ) -> Result<Vec<StashFile>> {
-        self.with_connection(move |connection| {
+        self.with_read_connection(move |connection| {
             let query = query.unwrap_or_default();
             let pattern = format!("%{}%", escape_like(&query));
             let (after_created, after_id) = after
@@ -337,7 +435,7 @@ impl FileStashStore {
         principal: String,
         file_id: String,
     ) -> Result<StashFile> {
-        self.with_connection(move |connection| {
+        self.with_read_connection(move |connection| {
             connection.query_row(
                 "SELECT f.file_id,f.display_name,f.size_bytes,f.blob_key,f.created_at,f.updated_at,CASE WHEN f.owner_principal_id=?1 THEN 1 ELSE 0 END FROM files f WHERE f.file_id=?2 AND f.ready=1 AND (f.owner_principal_id=?1 OR EXISTS(SELECT 1 FROM grants g WHERE g.file_id=f.file_id AND g.grantee_principal_id=?1 AND g.state='active'))",
                 params![principal,file_id],
@@ -410,7 +508,7 @@ impl FileStashStore {
         after: String,
         limit: usize,
     ) -> Result<Vec<StashGrant>> {
-        self.with_connection(move|connection|{
+        self.with_read_connection(move|connection|{
             let owns:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM files WHERE file_id=?2 AND owner_principal_id=?1 AND ready=1)",params![owner,file_id],|r|r.get(0)).map_err(FileStashStoreError::sqlite)?;
             if !owns{return Err(FileStashStoreError::NotFound)}
             let mut statement=connection.prepare("SELECT grant_id,file_id,grantee_principal_id,created_at FROM grants WHERE file_id=?1 AND state='active' AND grant_id>?2 ORDER BY grant_id LIMIT ?3").map_err(FileStashStoreError::sqlite)?;
@@ -424,7 +522,7 @@ impl FileStashStore {
         after: String,
         limit: usize,
     ) -> Result<Vec<PendingRecovery>> {
-        self.with_connection(move |connection| {
+        self.with_read_connection(move |connection| {
             let mut statement = connection
                 .prepare(
                     "SELECT upload_id,state,reserved_bytes FROM pending_uploads WHERE upload_id>?1 ORDER BY upload_id LIMIT ?2",
@@ -450,7 +548,7 @@ impl FileStashStore {
         now: i64,
         limit: usize,
     ) -> Result<Vec<PendingRecovery>> {
-        self.with_connection(move |connection| {
+        self.with_read_connection(move |connection| {
             let mut statement = connection.prepare("SELECT upload_id,state,reserved_bytes FROM pending_uploads WHERE expires_at<=?1 ORDER BY expires_at,upload_id LIMIT ?2").map_err(FileStashStoreError::sqlite)?;
             let rows = statement.query_map(params![now, i64::try_from(limit).unwrap_or(i64::MAX)], |r| Ok(PendingRecovery { upload_id:r.get(0)?, state:r.get(1)?, reserved_bytes:r.get::<_, i64>(2)? as u64 })).map_err(FileStashStoreError::sqlite)?;
             rows.collect::<std::result::Result<Vec<_>, _>>().map_err(FileStashStoreError::sqlite)
@@ -462,7 +560,7 @@ impl FileStashStore {
         after: String,
         limit: usize,
     ) -> Result<Vec<(String, u64)>> {
-        self.with_connection(move |connection| {
+        self.with_read_connection(move |connection| {
             let mut statement = connection
                 .prepare("SELECT blob_key,size_bytes FROM files WHERE ready=1 AND blob_key>?1 ORDER BY blob_key LIMIT ?2")
                 .map_err(FileStashStoreError::sqlite)?;
@@ -479,7 +577,7 @@ impl FileStashStore {
         &self,
         keys: Vec<String>,
     ) -> Result<HashSet<String>> {
-        self.with_connection(move |connection| {
+        self.with_read_connection(move |connection| {
             if keys.is_empty() {
                 return Ok(HashSet::new());
             }
@@ -562,6 +660,23 @@ fn open_connection(path: &Path, snapshot_id: &str) -> Result<Connection> {
         .map_err(FileStashStoreError::sqlite)?;
     schema::migrate(&mut c, snapshot_id)?;
     Ok(c)
+}
+
+fn open_read_connection(path: &Path) -> Result<Connection> {
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+    )
+    .map_err(FileStashStoreError::sqlite)?;
+    connection
+        .busy_timeout(BUSY_TIMEOUT)
+        .map_err(FileStashStoreError::sqlite)?;
+    connection
+        .pragma_update(None, "query_only", true)
+        .map_err(FileStashStoreError::sqlite)?;
+    Ok(connection)
 }
 
 #[cfg(all(test, any(target_os = "linux", target_os = "android")))]
@@ -650,6 +765,44 @@ mod tests {
             store.usage("owner".into()).await.unwrap(),
             StashUsage::default()
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn read_pool_allows_independent_reads_to_overlap() {
+        let (_temp, store) = store().await;
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let mut tasks = Vec::new();
+        for _ in 0..2 {
+            let store = store.clone();
+            let barrier = Arc::clone(&barrier);
+            tasks.push(tokio::spawn(async move {
+                store
+                    .with_read_connection(move |_| {
+                        barrier.wait();
+                        Ok(())
+                    })
+                    .await
+            }));
+        }
+        for task in tasks {
+            task.await.unwrap().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn recovery_cursor_resumes_an_interrupted_pass_and_resets_after_completion() {
+        let (_temp, store) = store().await;
+        assert_eq!(store.begin_recovery().await.unwrap(), "");
+        store
+            .checkpoint_recovery("01J00000000000000000000000".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            store.begin_recovery().await.unwrap(),
+            "01J00000000000000000000000"
+        );
+        store.complete_recovery().await.unwrap();
+        assert_eq!(store.begin_recovery().await.unwrap(), "");
     }
 
     #[tokio::test]

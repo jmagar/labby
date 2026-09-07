@@ -248,6 +248,22 @@ pub(crate) fn auth_context_from_extensions(
     parts.extensions.get::<AuthContext>()
 }
 
+pub(crate) fn verified_identity_from_extensions(
+    extensions: &rmcp::model::Extensions,
+) -> Option<&labby_auth::VerifiedIdentity> {
+    let parts = extensions.get::<Parts>()?;
+    parts.extensions.get::<labby_auth::VerifiedIdentity>()
+}
+
+pub(crate) fn bound_access_grant_from_extensions(
+    extensions: &rmcp::model::Extensions,
+) -> Option<&labby_primitives::product_credential::BoundAccessGrant> {
+    let parts = extensions.get::<Parts>()?;
+    parts
+        .extensions
+        .get::<labby_primitives::product_credential::BoundAccessGrant>()
+}
+
 pub(crate) fn tool_execute_scope_allowed(auth: Option<&AuthContext>) -> bool {
     auth.is_none_or(|auth| {
         auth.scopes

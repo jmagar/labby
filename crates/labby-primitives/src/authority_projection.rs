@@ -34,6 +34,12 @@ pub struct AuthorityProjectionEnvelope {
     pub kind: ProjectionKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot_base_sequence: Option<u64>,
+    /// Stable identifier shared by every chunk of one staged snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_id: Option<String>,
+    /// Activates the staged snapshot after this envelope is durably accepted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_complete: Option<bool>,
     pub generated_at: String,
     pub previous_digest: Option<String>,
     pub payload_digest: String,
@@ -89,6 +95,8 @@ mod tests {
             sequence_end: 2,
             kind: ProjectionKind::Delta,
             snapshot_base_sequence: None,
+            snapshot_id: None,
+            snapshot_complete: None,
             generated_at: "2026-09-05T00:00:00Z".into(),
             previous_digest: None,
             payload_digest: format!("sha256:{}", "11".repeat(32)),

@@ -6,6 +6,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.manage",
+    "resource_family": "platform",
     "params": [
       {
         "name": "team_id",
@@ -45,6 +48,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.read",
+    "resource_family": "platform",
     "params": [
       {
         "name": "team_id",
@@ -72,6 +78,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.manage",
+    "resource_family": "platform",
     "params": [
       {
         "name": "team_id",
@@ -105,6 +114,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "platform.manage",
+    "resource_family": "platform",
     "params": [
       {
         "name": "principal_id",
@@ -132,6 +144,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "platform.manage",
+    "resource_family": "platform",
     "params": [
       {
         "name": "principal_id",
@@ -159,6 +174,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "caller_membership_projection",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "object",
     "surface_availability": {
@@ -179,6 +197,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "membership.manage",
+    "resource_family": "platform",
     "params": [
       {
         "name": "team_id",
@@ -206,6 +227,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.create",
+    "resource_family": "platform",
     "params": [
       {
         "name": "team_id",
@@ -239,6 +263,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "caller_membership_projection",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "object",
     "surface_availability": {
@@ -259,6 +286,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "membership.manage",
+    "resource_family": "platform",
     "params": [
       {
         "name": "team_id",
@@ -298,6 +328,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "membership.manage",
+    "resource_family": "platform",
     "params": [
       {
         "name": "team_id",
@@ -331,6 +364,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "membership.manage",
+    "resource_family": "platform",
     "params": [
       {
         "name": "team_id",
@@ -370,6 +406,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "membership.manage",
+    "resource_family": "platform",
     "params": [
       {
         "name": "team_id",
@@ -403,6 +442,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "membership.manage",
+    "resource_family": "platform",
     "params": [
       {
         "name": "team_id",
@@ -430,6 +472,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.operate",
+    "resource_family": "platform",
     "params": [
       {
         "name": "token",
@@ -457,6 +502,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "membership.manage",
+    "resource_family": "platform",
     "params": [
       {
         "name": "team_id",
@@ -508,6 +556,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.manage",
+    "resource_family": "platform",
     "params": [
       {
         "name": "team_id",
@@ -547,6 +598,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "HelpPayload",
     "surface_availability": {
@@ -567,6 +621,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -594,6 +651,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.create",
+    "resource_family": "agent",
     "params": [
       {
         "name": "agent_id",
@@ -669,6 +729,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.delete",
+    "resource_family": "agent",
     "params": [
       {
         "name": "agent_id",
@@ -696,6 +759,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.read",
+    "resource_family": "agent",
     "params": [
       {
         "name": "agent_id",
@@ -723,7 +789,23 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
-    "params": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.read",
+    "resource_family": "agent",
+    "params": [
+      {
+        "name": "cursor",
+        "ty": "string",
+        "required": false,
+        "description": ""
+      },
+      {
+        "name": "limit",
+        "ty": "string",
+        "required": false,
+        "description": ""
+      }
+    ],
     "returns": "object",
     "surface_availability": {
       "cli": false,
@@ -743,6 +825,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.operate",
+    "resource_family": "agent",
     "params": [
       {
         "name": "agent_id",
@@ -770,6 +855,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.read",
+    "resource_family": "agent",
     "params": [
       {
         "name": "agent_id",
@@ -803,6 +891,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.manage",
+    "resource_family": "agent",
     "params": [
       {
         "name": "agent_id",
@@ -830,6 +921,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.manage",
+    "resource_family": "agent",
     "params": [
       {
         "name": "agent_id",
@@ -857,6 +951,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "HelpPayload",
     "surface_availability": {
@@ -877,6 +974,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -904,6 +1004,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "artifact_id",
@@ -949,6 +1052,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "artifact_id",
@@ -988,6 +1094,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -1015,6 +1124,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -1066,6 +1178,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "artifact_id",
@@ -1107,6 +1222,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -1160,6 +1278,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -1217,6 +1338,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "artifact_id",
@@ -1244,6 +1368,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -1277,6 +1404,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "artifact_id",
@@ -1316,6 +1446,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "source",
@@ -1355,6 +1488,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "sources",
@@ -1396,6 +1532,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -1429,6 +1568,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "cursor",
@@ -1462,6 +1604,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -1491,6 +1636,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -1530,6 +1678,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "ArtifactAuthorityConnectionPage",
     "surface_availability": {
@@ -1550,6 +1701,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -1625,6 +1779,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -1664,6 +1821,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "artifact_id",
@@ -1703,6 +1863,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "expected_library_version",
@@ -1736,6 +1899,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "artifact_id",
@@ -1781,6 +1947,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "artifact_id",
@@ -1832,6 +2001,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "query",
@@ -1871,6 +2043,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -1916,6 +2091,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -1961,6 +2139,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -2000,6 +2181,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -2041,6 +2225,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -2124,6 +2311,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -2175,6 +2365,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -2208,6 +2401,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "HelpPayload",
     "surface_availability": {
@@ -2228,6 +2424,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -2257,6 +2456,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "browser_id",
@@ -2322,6 +2524,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "BrowserList",
     "surface_availability": {
@@ -2344,6 +2549,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "pairing_id",
@@ -2373,6 +2581,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "BrowserPairingList",
     "surface_availability": {
@@ -2395,6 +2606,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "browser_id",
@@ -2424,6 +2638,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "session_id",
@@ -2459,6 +2676,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "session_id",
@@ -2488,6 +2708,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "cursor",
@@ -2521,6 +2744,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "BrowserBridgeStatus",
     "surface_availability": {
@@ -2541,6 +2767,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "HelpPayload",
     "surface_availability": {
@@ -2561,6 +2790,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -2590,6 +2822,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -2637,6 +2872,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -2684,6 +2922,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -2717,6 +2958,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -2750,6 +2994,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -2779,6 +3026,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -2814,6 +3064,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -2861,6 +3114,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -2900,6 +3156,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "HelpPayload",
     "surface_availability": {
@@ -2920,6 +3179,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -2947,6 +3209,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.create",
+    "resource_family": "dev_container",
     "params": [
       {
         "name": "instance_id",
@@ -2998,6 +3263,9 @@
     "destructive": true,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.delete",
+    "resource_family": "dev_container",
     "params": [
       {
         "name": "instance_id",
@@ -3025,7 +3293,23 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
-    "params": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.read",
+    "resource_family": "dev_container",
+    "params": [
+      {
+        "name": "cursor",
+        "ty": "string",
+        "required": false,
+        "description": "Exclusive instance identifier cursor"
+      },
+      {
+        "name": "limit",
+        "ty": "string",
+        "required": false,
+        "description": "Page size from 1 through 100"
+      }
+    ],
     "returns": "object",
     "surface_availability": {
       "cli": false,
@@ -3045,6 +3329,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.operate",
+    "resource_family": "dev_container",
     "params": [
       {
         "name": "instance_id",
@@ -3072,6 +3359,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.operate",
+    "resource_family": "dev_container",
     "params": [
       {
         "name": "instance_id",
@@ -3099,6 +3389,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.operate",
+    "resource_family": "dev_container",
     "params": [
       {
         "name": "instance_id",
@@ -3126,6 +3419,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "HelpPayload",
     "surface_availability": {
@@ -3146,6 +3442,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -3173,6 +3472,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "DoctorReport",
     "surface_availability": {
@@ -3193,6 +3495,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "stream<Finding>",
     "surface_availability": {
@@ -3213,6 +3518,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "live",
@@ -3240,6 +3548,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "Catalog",
     "surface_availability": {
@@ -3262,6 +3573,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "probe_targets",
@@ -3289,6 +3603,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "app_url",
@@ -3334,6 +3651,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "DoctorReport",
     "surface_availability": {
@@ -3354,6 +3674,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -3381,6 +3704,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "DoctorReport",
     "surface_availability": {
@@ -3401,6 +3727,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "path",
@@ -3428,6 +3757,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "path",
@@ -3461,6 +3793,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "HelpPayload",
     "surface_availability": {
@@ -3481,6 +3816,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -3510,6 +3848,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "spec",
@@ -3545,6 +3886,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -3574,6 +3918,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "GatewayClientView[]",
     "surface_availability": {
@@ -3596,6 +3943,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "CodeModeConfig",
     "surface_availability": {
@@ -3618,6 +3968,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "enabled",
@@ -3707,6 +4060,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "clients",
@@ -3742,6 +4098,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -3771,6 +4130,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -3800,6 +4162,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -3829,6 +4194,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "upstream",
@@ -3870,6 +4238,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "upstreams",
@@ -3923,6 +4294,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -3952,6 +4326,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "all",
@@ -3993,6 +4370,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4022,6 +4402,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "PendingImportView[]",
     "surface_availability": {
@@ -4044,6 +4427,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4073,6 +4459,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4126,6 +4515,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "ImportTombstoneView[]",
     "surface_availability": {
@@ -4148,6 +4540,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4201,6 +4596,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "ServerView[]",
     "surface_availability": {
@@ -4223,6 +4621,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "loadout",
@@ -4252,6 +4653,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4281,6 +4685,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "GatewayLoadoutConfig[]",
     "surface_availability": {
@@ -4303,6 +4710,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "GatewayLoadoutState[]",
     "surface_availability": {
@@ -4325,6 +4735,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4360,6 +4773,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4389,6 +4805,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4424,6 +4843,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4453,6 +4875,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4488,6 +4913,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4523,6 +4951,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4564,6 +4995,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4605,6 +5039,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4634,6 +5071,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4663,6 +5103,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -4698,6 +5141,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "upstream",
@@ -4727,6 +5173,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "upstream",
@@ -4762,6 +5211,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "url",
@@ -4791,6 +5243,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "resource",
@@ -4838,6 +5293,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "id",
@@ -4867,6 +5325,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "id",
@@ -4902,6 +5363,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "upstream",
@@ -4931,6 +5395,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "upstream",
@@ -4960,6 +5427,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "upstream",
@@ -4995,6 +5465,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "route",
@@ -5024,6 +5497,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -5053,6 +5529,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "ProtectedMcpRouteConfig[]",
     "surface_availability": {
@@ -5075,6 +5554,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "ProtectedMcpRouteState[]",
     "surface_availability": {
@@ -5097,6 +5579,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -5126,6 +5611,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "route",
@@ -5155,6 +5643,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -5184,6 +5675,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -5219,6 +5713,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "route",
@@ -5248,6 +5745,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -5283,6 +5783,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "{app: string?, mcp_gateway: string?, effective_mcp_gateway: string?}",
     "surface_availability": {
@@ -5305,6 +5808,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "GatewayCatalogDiff",
     "surface_availability": {
@@ -5327,6 +5833,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -5354,6 +5863,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -5383,6 +5895,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "id",
@@ -5412,6 +5927,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "GatewayServersDoc",
     "surface_availability": {
@@ -5434,6 +5952,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "service",
@@ -5463,6 +5984,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "service",
@@ -5492,6 +6016,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "service",
@@ -5527,6 +6054,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "upstream",
@@ -5556,6 +6086,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -5585,6 +6118,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "SupportedServiceView[]",
     "surface_availability": {
@@ -5607,6 +6143,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -5642,6 +6181,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -5683,6 +6225,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "since_unix",
@@ -5784,6 +6329,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "since_unix",
@@ -5891,6 +6439,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "id",
@@ -5920,6 +6471,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "id",
@@ -5949,6 +6503,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "id",
@@ -5978,6 +6535,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "ServerView[]",
     "surface_availability": {
@@ -6000,6 +6560,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "id",
@@ -6029,6 +6592,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "id",
@@ -6058,6 +6624,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "id",
@@ -6093,6 +6662,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "id",
@@ -6132,6 +6704,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "Catalog",
     "surface_availability": {
@@ -6152,6 +6727,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -6179,6 +6757,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "HelpPayload",
     "surface_availability": {
@@ -6201,6 +6782,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -6236,6 +6820,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -6271,6 +6858,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -6306,6 +6896,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -6341,6 +6934,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -6386,6 +6982,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -6413,6 +7012,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "Catalog",
     "surface_availability": {
@@ -6433,6 +7035,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "services",
@@ -6460,6 +7065,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -6487,6 +7095,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "Catalog",
     "surface_availability": {
@@ -6507,6 +7118,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -6536,6 +7150,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "limit",
@@ -6625,6 +7242,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "BootstrapOutcome",
     "surface_availability": {
@@ -6645,6 +7265,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "SetupReport",
     "surface_availability": {
@@ -6667,6 +7290,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "force",
@@ -6696,6 +7322,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "DraftDiscardOutcome",
     "surface_availability": {
@@ -6718,6 +7347,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "DraftEntry[]",
     "surface_availability": {
@@ -6740,6 +7372,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "entries",
@@ -6775,6 +7410,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "force",
@@ -6802,6 +7440,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "Catalog",
     "surface_availability": {
@@ -6824,6 +7465,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "service",
@@ -6853,6 +7497,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "force",
@@ -6882,6 +7529,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "service",
@@ -6911,6 +7561,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "service",
@@ -6940,6 +7593,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "server_url",
@@ -6969,6 +7625,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "PluginExportOutcome",
     "surface_availability": {
@@ -6991,6 +7650,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "repair",
@@ -7020,6 +7682,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "PluginSyncOutcome",
     "surface_availability": {
@@ -7042,6 +7707,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "force",
@@ -7071,6 +7739,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "preferences",
@@ -7112,6 +7783,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "SetupReport",
     "surface_availability": {
@@ -7132,6 +7806,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -7159,6 +7836,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "services",
@@ -7188,6 +7868,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "ServiceStatus[]",
     "surface_availability": {
@@ -7210,6 +7893,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "ServiceStatus[]",
     "surface_availability": {
@@ -7232,6 +7918,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "SettingsState",
     "surface_availability": {
@@ -7254,6 +7943,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "entries",
@@ -7283,6 +7975,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "entries",
@@ -7310,6 +8005,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "EnvSettingSpec[]",
     "surface_availability": {
@@ -7330,6 +8028,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "SettingsSchema",
     "surface_availability": {
@@ -7352,6 +8053,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "section",
@@ -7381,6 +8085,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "services.built_in_upstream_apis_enabled",
@@ -7410,6 +8117,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "SetupSnapshot",
     "surface_availability": {
@@ -7432,6 +8142,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "service",
@@ -7459,6 +8172,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "Catalog",
     "surface_availability": {
@@ -7479,6 +8195,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -7508,6 +8227,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -7555,6 +8277,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -7590,6 +8315,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -7617,6 +8345,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "SnippetList",
     "surface_availability": {
@@ -7639,6 +8370,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "execution_id",
@@ -7692,6 +8426,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -7721,6 +8458,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -7762,6 +8502,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "name",
@@ -7795,6 +8538,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "HelpPayload",
     "surface_availability": {
@@ -7815,6 +8561,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -7844,6 +8593,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -7891,6 +8643,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -7924,6 +8679,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -7953,6 +8711,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -7986,6 +8747,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "HelpPayload",
     "surface_availability": {
@@ -8006,6 +8770,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -8033,6 +8800,9 @@
     "destructive": true,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "principal_ownership_or_grant",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "file_id",
@@ -8072,6 +8842,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "principal_ownership_or_grant",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "file_id",
@@ -8117,6 +8890,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "principal_ownership_or_grant",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "file_id",
@@ -8168,6 +8944,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "principal_ownership_or_grant",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "file_id",
@@ -8213,6 +8992,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "principal_ownership_or_grant",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "cursor",
@@ -8258,6 +9040,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "principal_ownership_or_grant",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "file_id",
@@ -8297,6 +9082,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "principal_ownership_or_grant",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "file_id",
@@ -8342,6 +9130,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "principal_ownership_or_grant",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "query",
@@ -8393,6 +9184,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "principal_ownership_or_grant",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "owner_kind",
@@ -8426,6 +9220,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "HelpPayload",
     "surface_availability": {
@@ -8446,6 +9243,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -8473,6 +9273,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.operate",
+    "resource_family": "task",
     "params": [
       {
         "name": "task_id",
@@ -8500,6 +9303,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.create",
+    "resource_family": "task",
     "params": [
       {
         "name": "task_id",
@@ -8557,6 +9363,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.read",
+    "resource_family": "task",
     "params": [
       {
         "name": "task_id",
@@ -8584,7 +9393,23 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
-    "params": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.read",
+    "resource_family": "task",
+    "params": [
+      {
+        "name": "cursor",
+        "ty": "string",
+        "required": false,
+        "description": ""
+      },
+      {
+        "name": "limit",
+        "ty": "string",
+        "required": false,
+        "description": ""
+      }
+    ],
     "returns": "object",
     "surface_availability": {
       "cli": false,
@@ -8604,6 +9429,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.operate",
+    "resource_family": "task",
     "params": [
       {
         "name": "task_id",
@@ -8631,6 +9459,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "resource_capability",
+    "required_capability": "scope.read",
+    "resource_family": "task",
     "params": [
       {
         "name": "task_id",
@@ -8658,6 +9489,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [],
     "returns": "HelpPayload",
     "surface_availability": {
@@ -8678,6 +9512,9 @@
     "destructive": false,
     "requires_admin": false,
     "required_scopes": [],
+    "authorization_boundary": "transport",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "action",
@@ -8707,6 +9544,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -8742,6 +9582,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",
@@ -8777,6 +9620,9 @@
     "required_scopes": [
       "lab:admin"
     ],
+    "authorization_boundary": "transport_admin",
+    "required_capability": null,
+    "resource_family": null,
     "params": [
       {
         "name": "connection_id",

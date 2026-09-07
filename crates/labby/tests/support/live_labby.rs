@@ -285,6 +285,12 @@ impl LiveLabbyBuilder {
             ] {
                 std::fs::create_dir_all(path).map_err(|error| error.to_string())?;
             }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                std::fs::set_permissions(&labby_home, std::fs::Permissions::from_mode(0o700))
+                    .map_err(|error| error.to_string())?;
+            }
             if let Some(config) = &self.config {
                 std::fs::write(labby_home.join("config.toml"), config)
                     .map_err(|error| error.to_string())?;
@@ -502,6 +508,13 @@ impl LiveLabbyGuard {
     }
     pub(crate) fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub(crate) fn authorize_cli(&self, command: &mut TokioCommand) {
+        command
+            .env("LABBY_SERVER_URL", &self.descriptor.base_url)
+            .env("LABBY_MCP_HTTP_TOKEN", &self.credential_canary)
+            .env("LABBY_E2E_TEAM_ID", "bootstrap-initial-team");
     }
 
     pub(crate) async fn restart(&mut self) -> Result<(), String> {

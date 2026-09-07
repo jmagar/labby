@@ -416,12 +416,99 @@ pub(crate) fn recovery_inventory(
         .map_err(|_| DevContainerLedgerError::Storage)
 }
 
+pub(crate) fn recovery_inventory_page(
+    connection: &Connection,
+    after: &str,
+    limit: usize,
+) -> Result<Vec<RecoveryRecord>, DevContainerLedgerError> {
+    if limit == 0 || limit > 100 {
+        return Err(DevContainerLedgerError::InvalidInput);
+    }
+    let mut statement = connection
+        .prepare(
+            "SELECT instance_id,owner_kind,owner_id,lifecycle_nonce,desired_state,observed_state
+         FROM dev_container_instances WHERE observed_state != 'deleted' AND instance_id>?1
+         ORDER BY instance_id LIMIT ?2",
+        )
+        .map_err(|_| DevContainerLedgerError::Storage)?;
+    statement
+        .query_map(
+            params![
+                after,
+                i64::try_from(limit).map_err(|_| DevContainerLedgerError::InvalidInput)?
+            ],
+            |row| {
+                Ok(RecoveryRecord {
+                    instance_id: row.get(0)?,
+                    owner_kind: owner_kind(&row.get::<_, String>(1)?)?,
+                    owner_id: row.get(2)?,
+                    lifecycle_nonce: row.get(3)?,
+                    desired_state: desired_state(&row.get::<_, String>(4)?)?,
+                    observed_state: observed_state(&row.get::<_, String>(5)?)?,
+                })
+            },
+        )
+        .map_err(|_| DevContainerLedgerError::Storage)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|_| DevContainerLedgerError::Storage)
+}
+
+pub(super) fn authorized_recovery_inventory_page(
+    connection: &Connection,
+    after: &str,
+    limit: usize,
+    principal_id: &str,
+    platform_admin: bool,
+) -> Result<Vec<RecoveryRecord>, DevContainerLedgerError> {
+    if limit == 0 || limit > 100 {
+        return Err(DevContainerLedgerError::InvalidInput);
+    }
+    let mut statement = connection.prepare("WITH authorized_owners(owner_kind,owner_id) AS (SELECT 'personal',?3 UNION SELECT 'team',g.group_id FROM groups g JOIN team_memberships tm ON tm.organization_id=g.organization_id AND tm.team_id=g.group_id WHERE tm.principal_id=?3 AND tm.status='active' AND g.kind='team' AND g.status='active' UNION SELECT 'project',p.project_id FROM projects p JOIN project_memberships pm ON pm.organization_id=p.organization_id AND pm.project_id=p.project_id WHERE pm.principal_id=?3 AND pm.status='active' AND p.status='active' UNION SELECT 'personal',p.principal_id FROM principals p WHERE ?4 AND p.status='active' UNION SELECT 'team',g.group_id FROM groups g WHERE ?4 AND g.kind='team' AND g.status='active' UNION SELECT 'project',p.project_id FROM projects p WHERE ?4 AND p.status='active'), visible AS (SELECT d.* FROM dev_container_instances d JOIN authorized_owners a USING(owner_kind,owner_id) WHERE d.observed_state!='deleted' UNION ALL SELECT d.* FROM dev_container_instances d WHERE ?4 AND d.owner_kind='installation' AND d.observed_state!='deleted') SELECT instance_id,owner_kind,owner_id,lifecycle_nonce,desired_state,observed_state FROM visible WHERE instance_id>?1 ORDER BY instance_id LIMIT ?2").map_err(|_| DevContainerLedgerError::Storage)?;
+    statement
+        .query_map(
+            params![
+                after,
+                i64::try_from(limit).map_err(|_| DevContainerLedgerError::InvalidInput)?,
+                principal_id,
+                platform_admin
+            ],
+            |row| {
+                Ok(RecoveryRecord {
+                    instance_id: row.get(0)?,
+                    owner_kind: owner_kind(&row.get::<_, String>(1)?)?,
+                    owner_id: row.get(2)?,
+                    lifecycle_nonce: row.get(3)?,
+                    desired_state: desired_state(&row.get::<_, String>(4)?)?,
+                    observed_state: observed_state(&row.get::<_, String>(5)?)?,
+                })
+            },
+        )
+        .map_err(|_| DevContainerLedgerError::Storage)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|_| DevContainerLedgerError::Storage)
+}
+
 pub(crate) async fn recovery_inventory_for_store(
     store: &super::AccessStore,
 ) -> Result<Vec<RecoveryRecord>, DevContainerLedgerError> {
     store
         .with_connection(|connection| {
             recovery_inventory(connection).map_err(|_| {
+                super::AccessStoreError::Unavailable("Dev Container persistence unavailable".into())
+            })
+        })
+        .await
+        .map_err(|_| DevContainerLedgerError::Storage)
+}
+
+pub(crate) async fn recovery_inventory_page_for_store(
+    store: &super::AccessStore,
+    after: String,
+    limit: usize,
+) -> Result<Vec<RecoveryRecord>, DevContainerLedgerError> {
+    store
+        .with_connection(move |connection| {
+            recovery_inventory_page(connection, &after, limit).map_err(|_| {
                 super::AccessStoreError::Unavailable("Dev Container persistence unavailable".into())
             })
         })
