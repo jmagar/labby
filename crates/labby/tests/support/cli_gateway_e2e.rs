@@ -11,6 +11,12 @@ const LOADOUT: &str = "matrix-owned-loadout";
 const ROUTE: &str = "matrix-owned-route";
 
 pub(crate) async fn run() {
+    let guard = crate::live_labby::LiveLabbyBuilder::new()
+        .env("LABBY_E2E_BOOTSTRAP_STATIC_OWNER", "1")
+        .env("LABBY_E2E_TEAM_ID", "bootstrap-initial-team")
+        .start()
+        .await
+        .expect("authoritative gateway CLI daemon");
     let owned = tempfile::tempdir().expect("owned gateway CLI home");
     std::fs::create_dir_all(owned.path().join("tmp")).unwrap();
     let upstream_script = owned.path().join("upstream.py");
@@ -18,6 +24,7 @@ pub(crate) async fn run() {
     let upstream_script = upstream_script.to_str().expect("UTF-8 fixture path");
 
     let add = success(
+        &guard,
         owned.path(),
         &[
             "gateway",
@@ -33,7 +40,12 @@ pub(crate) async fn run() {
     )
     .await;
     assert_eq!(add["config"]["name"], UPSTREAM);
-    let get = success(owned.path(), &["gateway", "get", UPSTREAM, "--json"]).await;
+    let get = success(
+        &guard,
+        owned.path(),
+        &["gateway", "get", UPSTREAM, "--json"],
+    )
+    .await;
     assert_eq!(get["config"]["name"], UPSTREAM);
     record(
         "gateway:gateway.add",
@@ -47,6 +59,7 @@ pub(crate) async fn run() {
     );
 
     let discovered = success(
+        &guard,
         owned.path(),
         &["gateway", "discover", "--include-existing", "--json"],
     )
@@ -59,6 +72,7 @@ pub(crate) async fn run() {
     );
 
     let preview = success(
+        &guard,
         owned.path(),
         &[
             "gateway",
@@ -82,6 +96,7 @@ pub(crate) async fn run() {
         .as_str()
         .expect("preview metadata hash");
     let apply = asserted(
+        &guard,
         owned.path(),
         &[
             "gateway",
@@ -110,6 +125,7 @@ pub(crate) async fn run() {
     }
 
     let updated = success(
+        &guard,
         owned.path(),
         &[
             "gateway",
@@ -122,7 +138,12 @@ pub(crate) async fn run() {
     )
     .await;
     assert_eq!(updated["config"]["proxy_skills"], true);
-    let updated_get = success(owned.path(), &["gateway", "get", UPSTREAM, "--json"]).await;
+    let updated_get = success(
+        &guard,
+        owned.path(),
+        &["gateway", "get", UPSTREAM, "--json"],
+    )
+    .await;
     assert_eq!(updated_get["config"]["proxy_skills"], true);
     record(
         "gateway:gateway.update",
@@ -131,6 +152,7 @@ pub(crate) async fn run() {
     );
 
     let skills = asserted(
+        &guard,
         owned.path(),
         &[
             "gateway",
@@ -159,6 +181,7 @@ pub(crate) async fn run() {
     }
 
     let tested = success(
+        &guard,
         owned.path(),
         &["gateway", "test", "--name", UPSTREAM, "--json"],
     )
@@ -172,6 +195,7 @@ pub(crate) async fn run() {
     );
 
     let cleanup = success(
+        &guard,
         owned.path(),
         &["gateway", "mcp", "cleanup", UPSTREAM, "--dry-run", "--json"],
     )
@@ -185,13 +209,19 @@ pub(crate) async fn run() {
     );
 
     let disabled = success(
+        &guard,
         owned.path(),
         &["gateway", "mcp", "disable", UPSTREAM, "--json"],
     )
     .await;
     assert_eq!(disabled["gateway"]["config"]["enabled"], false);
     assert_eq!(
-        success(owned.path(), &["gateway", "get", UPSTREAM, "--json"]).await["config"]["enabled"],
+        success(
+            &guard,
+            owned.path(),
+            &["gateway", "get", UPSTREAM, "--json"]
+        )
+        .await["config"]["enabled"],
         false
     );
     record(
@@ -201,13 +231,19 @@ pub(crate) async fn run() {
     );
 
     let enabled = success(
+        &guard,
         owned.path(),
         &["gateway", "mcp", "enable", UPSTREAM, "--json"],
     )
     .await;
     assert_eq!(enabled["config"]["enabled"], true);
     assert_eq!(
-        success(owned.path(), &["gateway", "get", UPSTREAM, "--json"]).await["config"]["enabled"],
+        success(
+            &guard,
+            owned.path(),
+            &["gateway", "get", UPSTREAM, "--json"]
+        )
+        .await["config"]["enabled"],
         true
     );
     record(
@@ -217,6 +253,7 @@ pub(crate) async fn run() {
     );
 
     let restarted = success(
+        &guard,
         owned.path(),
         &["gateway", "mcp", "restart", UPSTREAM, "--json"],
     )
@@ -230,6 +267,7 @@ pub(crate) async fn run() {
     );
 
     let loadout_add = success(
+        &guard,
         owned.path(),
         &[
             "gateway",
@@ -244,6 +282,7 @@ pub(crate) async fn run() {
     .await;
     assert_eq!(loadout_add["name"], LOADOUT);
     let loadout_get = success(
+        &guard,
         owned.path(),
         &["gateway", "loadout", "get", LOADOUT, "--json"],
     )
@@ -261,6 +300,7 @@ pub(crate) async fn run() {
     );
 
     let loadout_patch = success(
+        &guard,
         owned.path(),
         &[
             "gateway",
@@ -276,6 +316,7 @@ pub(crate) async fn run() {
     assert_eq!(loadout_patch["description"], "changed");
     assert_eq!(
         success(
+            &guard,
             owned.path(),
             &["gateway", "loadout", "get", LOADOUT, "--json"]
         )
@@ -289,6 +330,7 @@ pub(crate) async fn run() {
     );
 
     let loadout_remove = success(
+        &guard,
         owned.path(),
         &["gateway", "loadout", "remove", LOADOUT, "--json"],
     )
@@ -296,6 +338,7 @@ pub(crate) async fn run() {
     assert_eq!(loadout_remove["name"], LOADOUT);
     assert_error_kind(
         &asserted(
+            &guard,
             owned.path(),
             &["gateway", "loadout", "get", LOADOUT, "--json"],
         )
@@ -308,9 +351,15 @@ pub(crate) async fn run() {
         "owned_loadout_removed",
     );
 
-    let route_add = success(owned.path(), &route_args("add", "owned.test", "/mcp")).await;
+    let route_add = success(
+        &guard,
+        owned.path(),
+        &route_args("add", "owned.test", "/mcp"),
+    )
+    .await;
     assert_eq!(route_add["name"], ROUTE);
     let route_get = success(
+        &guard,
         owned.path(),
         &["gateway", "protected-route", "get", ROUTE, "--json"],
     )
@@ -328,6 +377,7 @@ pub(crate) async fn run() {
     );
 
     let route_update = success(
+        &guard,
         owned.path(),
         &route_args("update", "updated.test", "/updated"),
     )
@@ -335,6 +385,7 @@ pub(crate) async fn run() {
     assert_eq!(route_update["public_host"], "updated.test");
     assert_eq!(
         success(
+            &guard,
             owned.path(),
             &["gateway", "protected-route", "get", ROUTE, "--json"]
         )
@@ -348,6 +399,7 @@ pub(crate) async fn run() {
     );
 
     let route_remove = success(
+        &guard,
         owned.path(),
         &["gateway", "protected-route", "remove", ROUTE, "--json"],
     )
@@ -355,6 +407,7 @@ pub(crate) async fn run() {
     assert_eq!(route_remove["name"], ROUTE);
     assert_error_kind(
         &asserted(
+            &guard,
             owned.path(),
             &["gateway", "protected-route", "get", ROUTE, "--json"],
         )
@@ -367,16 +420,32 @@ pub(crate) async fn run() {
         "owned_route_removed",
     );
 
-    let removed = success(owned.path(), &["gateway", "remove", UPSTREAM, "--json"]).await;
+    let removed = success(
+        &guard,
+        owned.path(),
+        &["gateway", "remove", UPSTREAM, "--json"],
+    )
+    .await;
     assert_eq!(removed["config"]["name"], UPSTREAM);
     assert_error_kind(
-        &asserted(owned.path(), &["gateway", "get", UPSTREAM, "--json"]).await,
+        &asserted(
+            &guard,
+            owned.path(),
+            &["gateway", "get", UPSTREAM, "--json"],
+        )
+        .await,
         "not_found",
     );
     record(
         "gateway:gateway.remove",
         EvidenceLevel::LiveStateTransition,
         "owned_upstream_removed",
+    );
+    let cleanup = guard.finish().await;
+    assert!(
+        cleanup.is_clean(),
+        "gateway daemon cleanup: {:?}",
+        cleanup.failures
     );
 }
 
@@ -420,8 +489,12 @@ struct AssertedOutput {
     body: Value,
 }
 
-async fn asserted(home: &Path, args: &[&str]) -> AssertedOutput {
-    let output = action_scenarios::run_cli(home, args)
+async fn asserted(
+    guard: &crate::live_labby::LiveLabbyGuard,
+    home: &Path,
+    args: &[&str],
+) -> AssertedOutput {
+    let output = action_scenarios::run_cli_against(home, args, guard)
         .await
         .unwrap_or_else(|error| panic!("{}: {error}", args.join(" ")));
     action_scenarios::assert_sanitized(&output.stdout, &args.join(" "));
@@ -436,8 +509,8 @@ async fn asserted(home: &Path, args: &[&str]) -> AssertedOutput {
     AssertedOutput { output, body }
 }
 
-async fn success(home: &Path, args: &[&str]) -> Value {
-    let result = asserted(home, args).await;
+async fn success(guard: &crate::live_labby::LiveLabbyGuard, home: &Path, args: &[&str]) -> Value {
+    let result = asserted(guard, home, args).await;
     assert!(
         result.output.status.success(),
         "{} failed: {}",

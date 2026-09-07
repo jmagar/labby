@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { __setBrowserSessionStateForTests } from '../auth/session-store.ts'
-import { confirmGatewayParams, gatewayHeaders, gatewayRequestInit } from './gateway-request.ts'
+import { captureGatewayAuthority, confirmGatewayParams, gatewayHeaders, gatewayRequestInit } from './gateway-request.ts'
 
 test('gatewayRequestInit never sends bearer headers even if legacy bearer inputs are supplied', () => {
   const init = gatewayRequestInit('gateway.list', {}, 'dev-token', undefined, true)
@@ -62,6 +62,24 @@ test('gatewayRequestInit forwards the project bound to the browser session', () 
 
   assert.equal(headers['x-labby-project-id'], 'project-42')
   assert.equal(headers['x-csrf-token'], 'csrf-123')
+})
+
+test('gateway headers and captured requests are qualified by explicit workspace context', () => {
+  __setBrowserSessionStateForTests({
+    status: 'authenticated', user: { sub: 'provider-sub' }, expiresAt: 42, csrfToken: 'csrf',
+    authority: {
+      schemaVersion: 1, compatibilityGeneration: 1, principalId: 'principal-1', organizationId: 'org-1',
+      activeOwner: { kind: 'project', id: 'project-1' }, activeTeamId: 'team-1', activeProjectId: 'project-1',
+      teams: [{ id: 'team-1', role: 'owner', membershipEpoch: 1, policyEpoch: 1 }], projects: [{ id: 'project-1', role: 'manager' }],
+      capabilities: ['scope.read'], generation: 8,
+    }, projectId: 'project-1',
+  })
+  const headers = gatewayHeaders() as Record<string, string>
+  assert.equal(headers['x-labby-team-id'], 'team-1')
+  assert.equal(headers['x-labby-project-id'], 'project-1')
+  const captured = captureGatewayAuthority()
+  assert.equal(captured.cacheKey.includes('principal-1'), false)
+  captured.finish()
 })
 
 test('confirmGatewayParams marks destructive gateway mutations for explicit confirmation', () => {

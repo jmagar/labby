@@ -734,6 +734,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(first["outcome"], "committed");
+        let depot_local_id = first["artifact_id"].as_str().unwrap().to_owned();
         let replay = coordinator
             .import(
                 &service,
@@ -772,13 +773,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(repo_result["outcome"], "committed");
+        let repository_local_id = repo_result["artifact_id"].as_str().unwrap().to_owned();
         assert_eq!(store.library_snapshot().unwrap().records.len(), 2);
         let repository_record = store
             .library_snapshot()
             .unwrap()
             .records
             .into_values()
-            .find(|record| record.artifact_id == repository_id)
+            .find(|record| record.artifact_id == repository_local_id)
             .expect("repository import in local library");
         assert_eq!(
             repository_record.provenance_provider.as_deref(),
@@ -800,7 +802,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .find(|item| item["artifact_id"] == repository_id)
+                .find(|item| item["artifact_id"] == repository_local_id)
                 .unwrap()["provenance"]["source"],
             "repository"
         );
@@ -884,7 +886,7 @@ mod tests {
                 "bootstrap-default",
                 "artifacts.activate",
                 json!({
-                    "artifact_id": depot_id.clone(),
+                    "artifact_id": depot_local_id.clone(),
                     "expected_revision_id": depot_revision.clone(),
                     "expected_library_version": 3,
                     "idempotency_key": "activate-local"
@@ -911,7 +913,7 @@ mod tests {
                 caller(),
                 "bootstrap-default",
                 "artifacts.get",
-                json!({"artifact_id": depot_id}),
+                json!({"artifact_id": depot_local_id.clone()}),
                 &SkillLibraryCorrelationId::parse("get-local-6").unwrap(),
             )
             .await
@@ -924,7 +926,7 @@ mod tests {
                 "bootstrap-default",
                 "artifacts.read",
                 json!({
-                    "artifact_id": depot_id,
+                    "artifact_id": depot_local_id,
                     "revision_id": depot_revision,
                     "path": "SKILL.md"
                 }),

@@ -84,6 +84,8 @@ fn prepare(root: &std::path::Path) -> serde_json::Value {
             RESOURCE,
             "--scope",
             "lab:read",
+            "--scope",
+            "lab:admin",
             "--ttl",
             "300",
             "--json",
@@ -209,12 +211,14 @@ async fn shipped_bootstrap_survives_restart_and_cleanup_tombstones_all_access() 
     let proof = bundle["proof"].as_str().unwrap().to_owned();
     let manifest = bundle["manifest"].clone();
     let credential = std::fs::read_to_string(root.join("credential.txt")).unwrap();
-    let static_token = format!("contract-static-{}", ulid::Ulid::new());
     let mut daemon = LiveLabbyBuilder::new()
         .existing_root(&root)
-        .config(published_policy_config(&["lab:read"]))
+        .config(published_policy_config(&["lab:admin", "lab:read"]))
         .env("LABBY_WEB_UI_AUTH_DISABLED", "false")
-        .env("LABBY_MCP_HTTP_TOKEN", &static_token)
+        .env(
+            "LABBY_MCP_HTTP_TOKEN",
+            format!("contract-static-{}", ulid::Ulid::new()),
+        )
         .env("LABBY_PUBLIC_URL", "https://lab.example.test")
         .start()
         .await
@@ -288,7 +292,7 @@ async fn shipped_bootstrap_survives_restart_and_cleanup_tombstones_all_access() 
 
     let reload = client
         .post(format!("{base}/v1/gateway"))
-        .bearer_auth(&static_token)
+        .bearer_auth(&credential)
         .json(&serde_json::json!({
             "action": "gateway.reload",
             "params": {"confirm": true}
@@ -306,7 +310,7 @@ async fn shipped_bootstrap_survives_restart_and_cleanup_tombstones_all_access() 
     daemon.restart().await.unwrap();
     std::fs::write(
         root.join("labby-home/config.toml"),
-        published_policy_config(&["lab:admin", "lab:read"]),
+        published_policy_config(&["lab:admin"]),
     )
     .unwrap();
     daemon.restart().await.unwrap();

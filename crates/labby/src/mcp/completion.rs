@@ -122,8 +122,10 @@ impl LabMcpServer {
         #[cfg(feature = "gateway")]
         if let Some(pool) = self.current_upstream_pool().await {
             let auth = auth_context_from_extensions(&context.extensions);
-            let oauth_subject =
-                oauth_upstream_subject_for_request(auth, self.request_subject(&context));
+            let oauth_subject = self.route_oauth_subject(oauth_upstream_subject_for_request(
+                auth,
+                self.request_subject(&context),
+            ));
 
             if let Some(oauth_subject) = oauth_subject.as_deref() {
                 let configs = self.route_scoped_oauth_upstream_configs().await;

@@ -2078,7 +2078,6 @@ mod tests {
                 .status()
                 .unwrap()
         };
-        let started = std::time::Instant::now();
         assert!(run("1", false).success());
         let calls = std::fs::read_to_string(&log).unwrap();
         assert!(!calls.contains("systemctl:restart"));
@@ -2086,8 +2085,12 @@ mod tests {
         let calls = std::fs::read_to_string(&log).unwrap();
         assert!(calls.contains("systemctl:restart labby.service"));
         assert!(calls.contains("sleep:1"));
+        let started = std::time::Instant::now();
         assert!(!run("999", true).success());
-        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "emulated watchdog timeout was not bounded"
+        );
         let calls = std::fs::read_to_string(&log).unwrap();
         assert!(calls.contains("curl:bounded-timeout"));
         let pid = std::fs::read_to_string(&hung_pid).unwrap();

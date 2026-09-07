@@ -203,11 +203,15 @@ pub(crate) async fn handle(
                     let spec = crate::dispatch::remote_control::REMOTE_ARTIFACT_ACTIONS
                         .iter()
                         .find(|candidate| candidate.name == action);
-                    let permission = if spec.is_some_and(|spec| spec.requires_admin) {
-                        crate::access::Permission::AssetUse
-                    } else {
-                        crate::access::Permission::AssetDiscover
-                    };
+                    let operation =
+                        crate::dispatch::remote_control::operation("artifacts", &action)
+                            .ok_or_else(|| ToolError::UnknownAction {
+                                message: format!("Unknown action: {action}"),
+                                valid: Vec::new(),
+                                hint: None,
+                            })?;
+                    let permission =
+                        crate::dispatch::artifact_control::operation_permission(operation);
                     if spec.is_some_and(|spec| spec.requires_admin) {
                         crate::api::services::remote_control::require_session_csrf(
                             &action,
@@ -220,6 +224,9 @@ pub(crate) async fn handle(
                             &access_runtime,
                             verified_identity,
                             project_id.as_deref(),
+                            library_headers
+                                .get("x-labby-team-id")
+                                .and_then(|value| value.to_str().ok()),
                             permission,
                         )
                         .await?;
@@ -273,11 +280,24 @@ pub(crate) async fn handle(
                         true,
                     )
                 };
+                let selected_team_id = library_headers
+                    .get("x-labby-team-id")
+                    .map(|value| {
+                        value
+                            .to_str()
+                            .map(str::to_owned)
+                            .map_err(|_| ToolError::InvalidParam {
+                                message: "Skill Library team context is invalid".to_owned(),
+                                param: "x-labby-team-id".to_owned(),
+                            })
+                    })
+                    .transpose()?;
                 let caller = crate::dispatch::skill_library::auth::SkillLibraryCaller::new(
                     identity,
                     auth.scopes,
                     transport,
-                );
+                )
+                .with_selected_team_id(selected_team_id);
                 let correlation =
                     crate::dispatch::skill_library::audit::SkillLibraryCorrelationId::parse(
                         correlation,

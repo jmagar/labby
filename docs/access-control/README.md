@@ -33,6 +33,9 @@ The goal is not merely to add roles. Labby must be able to answer, consistently 
 - [ENGINEERING_REVIEW.md](./ENGINEERING_REVIEW.md) records the pre-implementation architecture, simplicity, security, performance, failure-mode, and deferral review.
 - [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) defines the TDD implementation sequence and required verification gates.
 - [PROGRESS.md](./PROGRESS.md) tracks decisions, implementation status, tests, migrations, and documentation follow-through.
+- [MULTI_USER_AUTHORITY.md](./MULTI_USER_AUTHORITY.md) freezes the v1 multi-user/Team authority, ownership, projection, delegation, migration, recovery, and audit contract shared with Depot.
+- [authority-matrix-v1.json](./authority-matrix-v1.json) is the checked role/capability/resource/service classification registry.
+- [MIGRATION.md](./MIGRATION.md) defines the production-shaped ownership migration rehearsal, activation boundary, backup/restore set, quarantine, and rollback proof.
 
 ## Existing contracts this design preserves
 

@@ -40,7 +40,15 @@ pub use types::{
     SetupState,
 };
 
-use labby_primitives::plugin::{Category, PluginMeta};
+use labby_primitives::plugin::{Category, EnvVar, PluginMeta};
+
+const OPTIONAL_ENV: &[EnvVar] = &[EnvVar {
+    name: "LABBY_ACCESS_MIGRATION_EVIDENCE",
+    description: "Path to the source/checkpoint-bound approval evidence for an access-store schema migration",
+    example: "/run/labby/access-migration-v7.json",
+    secret: false,
+    ui: None,
+}];
 
 /// Compile-time metadata for the setup Bootstrap service.
 pub const META: PluginMeta = PluginMeta {
@@ -50,7 +58,7 @@ pub const META: PluginMeta = PluginMeta {
     category: Category::Bootstrap,
     docs_url: "",
     required_env: &[],
-    optional_env: &[],
+    optional_env: OPTIONAL_ENV,
     default_port: None,
     supports_multi_instance: false,
 };

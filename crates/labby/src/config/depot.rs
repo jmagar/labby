@@ -11,6 +11,14 @@ pub const MAX_PROVIDERS: usize = 16;
 pub const MAX_TOMBSTONES: usize = 4096;
 pub const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DepotControlMode {
+    #[default]
+    Standalone,
+    LabbyManaged,
+}
+
 /// Wire generations remain opaque strings even if an upstream uses numbers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -38,10 +46,20 @@ impl From<OpaqueEpoch> for String {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DepotPreferences {
+    pub control_mode: DepotControlMode,
+    pub managed_authority_kill_switch: bool,
     pub public_enabled: bool,
     pub providers: Vec<toml::Value>,
     pub tombstones: BTreeSet<String>,
     pub legacy_migrated: bool,
+    /// Managed authority replication target and secret references. The signing
+    /// key and bearer value are resolved from the named environment variables
+    /// only when the daemon starts; they are never serialized into projections.
+    pub authority_endpoint: Option<String>,
+    pub authority_bearer_token_env: Option<String>,
+    pub authority_installation_id: Option<String>,
+    pub authority_key_id: Option<String>,
+    pub authority_signing_key_env: Option<String>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, toml::Value>,
 }
@@ -49,10 +67,17 @@ pub struct DepotPreferences {
 impl Default for DepotPreferences {
     fn default() -> Self {
         Self {
+            control_mode: DepotControlMode::Standalone,
+            managed_authority_kill_switch: false,
             public_enabled: true,
             providers: Vec::new(),
             tombstones: BTreeSet::new(),
             legacy_migrated: false,
+            authority_endpoint: None,
+            authority_bearer_token_env: None,
+            authority_installation_id: None,
+            authority_key_id: None,
+            authority_signing_key_env: None,
             extra: BTreeMap::new(),
         }
     }
@@ -62,9 +87,23 @@ impl std::fmt::Debug for DepotPreferences {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DepotPreferences")
             .field("public_enabled", &self.public_enabled)
+            .field("control_mode", &self.control_mode)
+            .field(
+                "managed_authority_kill_switch",
+                &self.managed_authority_kill_switch,
+            )
             .field("provider_count", &self.providers.len())
             .field("tombstone_count", &self.tombstones.len())
             .field("legacy_migrated", &self.legacy_migrated)
+            .field(
+                "authority_endpoint_configured",
+                &self.authority_endpoint.is_some(),
+            )
+            .field(
+                "authority_credentials_configured",
+                &(self.authority_bearer_token_env.is_some()
+                    && self.authority_signing_key_env.is_some()),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -123,6 +162,16 @@ pub struct LegacyDepot {
 }
 
 impl DepotPreferences {
+    /// Managed mode must never fall back to standalone authority when its
+    /// projection path is stale, disabled, or on an unknown protocol version.
+    #[must_use]
+    pub fn managed_mutations_ready(&self, projection_ready: bool, protocol_version: u64) -> bool {
+        self.control_mode == DepotControlMode::LabbyManaged
+            && !self.managed_authority_kill_switch
+            && projection_ready
+            && protocol_version == 1
+    }
+
     #[must_use]
     pub fn resolve(&self, legacy: &LegacyDepot) -> ResolvedDepot {
         let mut result = ResolvedDepot {

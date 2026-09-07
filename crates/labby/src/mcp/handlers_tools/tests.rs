@@ -242,6 +242,43 @@ fn test_server(
     }
 }
 
+async fn authorized_test_access_runtime() -> Arc<crate::access::AccessRuntime> {
+    let directory = tempfile::Builder::new()
+        .prefix("labby-mcp-access-test-")
+        .tempdir_in(std::env::current_dir().expect("test working directory"))
+        .expect("access tempdir");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("secure access tempdir");
+    }
+    let runtime = Arc::new(
+        crate::access::AccessRuntime::initialize(directory.keep().join("access.db")).await,
+    );
+    let identity = labby_auth::VerifiedIdentity::local_credential(
+        labby_auth::Authenticator::StaticBearer,
+        "static-bearer:primary",
+    )
+    .expect("static bearer identity");
+    runtime
+        .bootstrap_owner(
+            crate::access::BootstrapOwnerInput::new(identity, "Local", "Default")
+                .expect("bootstrap input"),
+        )
+        .await
+        .expect("bootstrap access authority");
+    runtime
+}
+
+fn primary_static_bearer_identity() -> labby_auth::VerifiedIdentity {
+    labby_auth::VerifiedIdentity::local_credential(
+        labby_auth::Authenticator::StaticBearer,
+        "static-bearer:primary",
+    )
+    .expect("static bearer identity")
+}
+
 async fn code_mode_manager(
     enabled: bool,
 ) -> Arc<crate::dispatch::gateway::manager::GatewayManager> {
@@ -5669,7 +5706,7 @@ async fn gateway_add_through_mcp_protected_route_suppresses_hidden_enrichment_su
     let mut hidden_spec = fixture_upstream_config("github");
     hidden_spec.enabled = false;
 
-    let server = test_server(
+    let mut server = test_server(
         crate::registry::build_default_registry(),
         Some(manager),
         crate::mcp::route_scope::McpRouteScope::protected_subset(
@@ -5680,6 +5717,7 @@ async fn gateway_add_through_mcp_protected_route_suppresses_hidden_enrichment_su
         ),
         crate::mcp::logging::LoggingLevel::Emergency,
     );
+    server.access_runtime = authorized_test_access_runtime().await;
     let peer_server = test_server(
         ToolRegistry::new(),
         None,
@@ -5692,7 +5730,8 @@ async fn gateway_add_through_mcp_protected_route_suppresses_hidden_enrichment_su
         transport,
         None,
     );
-    let context = request_context_with_peer(running.peer().clone());
+    let mut context = request_context_with_peer(running.peer().clone());
+    context.extensions.insert(primary_static_bearer_identity());
 
     let result = Box::pin(server.call_tool_impl(
         CallToolRequestParams::new("gateway").with_arguments(serde_json::Map::from_iter([
@@ -5758,7 +5797,7 @@ async fn gateway_pending_import_approve_through_mcp_protected_route_suppresses_h
         )
         .await;
 
-    let server = test_server(
+    let mut server = test_server(
         crate::registry::build_default_registry(),
         Some(manager),
         crate::mcp::route_scope::McpRouteScope::protected_subset(
@@ -5769,6 +5808,7 @@ async fn gateway_pending_import_approve_through_mcp_protected_route_suppresses_h
         ),
         crate::mcp::logging::LoggingLevel::Emergency,
     );
+    server.access_runtime = authorized_test_access_runtime().await;
     let peer_server = test_server(
         ToolRegistry::new(),
         None,
@@ -5781,7 +5821,8 @@ async fn gateway_pending_import_approve_through_mcp_protected_route_suppresses_h
         transport,
         None,
     );
-    let context = request_context_with_peer(running.peer().clone());
+    let mut context = request_context_with_peer(running.peer().clone());
+    context.extensions.insert(primary_static_bearer_identity());
 
     let result = Box::pin(server.call_tool_impl(
         CallToolRequestParams::new("gateway").with_arguments(serde_json::Map::from_iter([

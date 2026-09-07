@@ -214,13 +214,23 @@ pub async fn auth_session(
     State(state): State<AppState>,
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
+    identity: Option<Extension<labby_auth::VerifiedIdentity>>,
 ) -> impl IntoResponse {
     let start = Instant::now();
     let request_id = request_id(&headers).map(ToOwned::to_owned);
     log_auth_dispatch_start("session.get", request_id.as_deref());
 
     if let Some(Extension(context)) = auth {
-        let is_admin = context.scopes.iter().any(|scope| scope == "lab:admin");
+        let Some(Extension(identity)) = identity else {
+            return internal_error_response("authenticated authority is unavailable");
+        };
+        let authority = match state.access_runtime.session_authority(identity).await {
+            Ok(authority) => authority,
+            Err(error) => {
+                tracing::warn!(error = %error, "authenticated session authority resolution failed");
+                return internal_error_response("authenticated authority is unavailable");
+            }
+        };
         let mut project_id = None;
         let mut expires_at = DEV_SESSION_EXPIRES_AT;
         if context.via_session
@@ -257,12 +267,21 @@ pub async fn auth_session(
         let response = no_store_json(serde_json::json!({
             "authenticated": true,
             "login_available": false,
-            "is_admin": is_admin,
+            // OAuth scopes are only a transport ceiling. Domain administration
+            // is projected from durable access authority, never inferred here.
+            "is_admin": authority.capabilities.iter().any(|capability| capability.as_wire() == "platform.manage"),
             "user": {
                 "sub": context.sub,
                 "email": context.email,
             },
             "project_id": project_id,
+            "owner": { "kind": "personal", "id": authority.principal_id },
+            "organization_id": authority.organization_id,
+            "teams": authority.teams.iter().map(|(id, role, membership_epoch, policy_epoch)| serde_json::json!({"id":id,"role":role.as_wire(),"membership_epoch":membership_epoch,"policy_epoch":policy_epoch})).collect::<Vec<_>>(),
+            "projects": authority.projects.iter().map(|(id, role)| serde_json::json!({"id":id,"role":role.as_wire()})).collect::<Vec<_>>(),
+            "project": project_id,
+            "capabilities": authority.capabilities.iter().map(|capability| capability.as_wire()).collect::<Vec<_>>(),
+            "authority_generation": authority.authority_generation,
             "expires_at": expires_at,
             "csrf_token": context.csrf_token.unwrap_or_default(),
         }));
@@ -289,16 +308,38 @@ pub async fn auth_session(
             Ok(Some(session)) if session.project_binding.is_some() => {
                 let actor_key = actor_key_for_session(&state, &session);
                 let binding = session.project_binding.as_ref().expect("guarded above");
-                let is_admin = binding.scopes.iter().any(|scope| scope == "lab:admin");
+                let identity = match labby_auth::VerifiedIdentity::local_credential_with_issuer(
+                    labby_auth::Authenticator::BrowserSession,
+                    binding.issuer.clone(),
+                    binding.source_credential_id.clone(),
+                ) {
+                    Ok(identity) => identity,
+                    Err(_) => {
+                        return internal_error_response("authenticated authority is unavailable");
+                    }
+                };
+                let authority = match state.access_runtime.session_authority(identity).await {
+                    Ok(authority) => authority,
+                    Err(_) => {
+                        return internal_error_response("authenticated authority is unavailable");
+                    }
+                };
                 let response = no_store_json(serde_json::json!({
                     "authenticated": true,
                     "login_available": state.oauth_state.is_some(),
-                    "is_admin": is_admin,
+                    "is_admin": authority.capabilities.iter().any(|capability| capability.as_wire() == "platform.manage"),
                     "user": {
                         "sub": binding.principal_id,
                         "email": session.email,
                     },
                     "project_id": binding.project_id,
+                    "owner": { "kind": "personal", "id": authority.principal_id },
+                    "organization_id": authority.organization_id,
+                    "teams": authority.teams.iter().map(|(id, role, membership_epoch, policy_epoch)| serde_json::json!({"id":id,"role":role.as_wire(),"membership_epoch":membership_epoch,"policy_epoch":policy_epoch})).collect::<Vec<_>>(),
+                    "projects": authority.projects.iter().map(|(id, role)| serde_json::json!({"id":id,"role":role.as_wire()})).collect::<Vec<_>>(),
+                    "project": binding.project_id,
+                    "capabilities": authority.capabilities.iter().map(|capability| capability.as_wire()).collect::<Vec<_>>(),
+                    "authority_generation": authority.authority_generation,
                     "expires_at": session.expires_at,
                     "csrf_token": session.csrf_token,
                 }));
@@ -333,6 +374,7 @@ pub async fn auth_session(
             "authenticated": true,
             "login_available": false,
             "is_admin": true,
+            "dev_authority_bypass": true,
             "user": {
                 "sub": "labby-dev",
                 "email": serde_json::Value::Null,
@@ -355,16 +397,34 @@ pub async fn auth_session(
             .and_then(labby_auth::parse_bearer_token)
         && labby_auth::tokens_equal(&token, expected.as_ref())
     {
+        let identity = match labby_auth::VerifiedIdentity::local_credential(
+            labby_auth::Authenticator::StaticBearer,
+            "static-bearer:primary",
+        ) {
+            Ok(identity) => identity,
+            Err(_) => return internal_error_response("authenticated authority is unavailable"),
+        };
+        let authority = match state.access_runtime.session_authority(identity).await {
+            Ok(authority) => authority,
+            Err(_) => return internal_error_response("authenticated authority is unavailable"),
+        };
         let response = no_store_json(serde_json::json!({
             "authenticated": true,
             "login_available": state.oauth_state.is_some(),
-            "is_admin": true,
+            "is_admin": authority.capabilities.iter().any(|capability| capability.as_wire() == "platform.manage"),
             "user": {
                 "sub": "static-bearer",
                 "email": serde_json::Value::Null,
             },
             "expires_at": DEV_SESSION_EXPIRES_AT,
             "csrf_token": "",
+            "owner": { "kind": "personal", "id": authority.principal_id },
+            "organization_id": authority.organization_id,
+            "teams": authority.teams.iter().map(|(id, role, membership_epoch, policy_epoch)| serde_json::json!({"id":id,"role":role.as_wire(),"membership_epoch":membership_epoch,"policy_epoch":policy_epoch})).collect::<Vec<_>>(),
+            "projects": authority.projects.iter().map(|(id, role)| serde_json::json!({"id":id,"role":role.as_wire()})).collect::<Vec<_>>(),
+            "project": serde_json::Value::Null,
+            "capabilities": authority.capabilities.iter().map(|capability| capability.as_wire()).collect::<Vec<_>>(),
+            "authority_generation": authority.authority_generation,
         }));
         log_auth_dispatch("session.get", request_id.as_deref(), start, None, None);
         return response;
@@ -377,32 +437,41 @@ pub async fn auth_session(
         return response;
     };
 
-    let admin_email = state
-        .auth_config
-        .as_ref()
-        .map(|cfg| cfg.admin_email.as_str())
-        .unwrap_or("");
-
     match load_browser_session(&auth_state, &headers).await {
         Ok(Some(session)) => {
             let actor_key = actor_key_for_session(&state, &session);
+            let identity = match labby_auth::VerifiedIdentity::external(
+                labby_auth::Authenticator::BrowserSession,
+                &auth_state.inbound_provider_binding().identity_issuer,
+                session.subject.clone(),
+            ) {
+                Ok(identity) => identity,
+                Err(_) => return internal_error_response("authenticated authority is unavailable"),
+            };
+            let authority = match state.access_runtime.session_authority(identity).await {
+                Ok(authority) => authority,
+                Err(_) => return internal_error_response("authenticated authority is unavailable"),
+            };
             let project_id = session
                 .project_binding
                 .as_ref()
                 .map(|binding| binding.project_id.as_str());
-            let is_admin = session
-                .email
-                .as_deref()
-                .is_some_and(|e| e.eq_ignore_ascii_case(admin_email) && !admin_email.is_empty());
             let body = serde_json::json!({
                 "authenticated": true,
                 "login_available": login_available,
-                "is_admin": is_admin,
+                "is_admin": authority.capabilities.iter().any(|capability| capability.as_wire() == "platform.manage"),
                 "user": {
                     "sub": session.subject,
                     "email": session.email,
                 },
                 "project_id": project_id,
+                "owner": { "kind": "personal", "id": authority.principal_id },
+                "organization_id": authority.organization_id,
+                "teams": authority.teams.iter().map(|(id, role, membership_epoch, policy_epoch)| serde_json::json!({"id":id,"role":role.as_wire(),"membership_epoch":membership_epoch,"policy_epoch":policy_epoch})).collect::<Vec<_>>(),
+                "projects": authority.projects.iter().map(|(id, role)| serde_json::json!({"id":id,"role":role.as_wire()})).collect::<Vec<_>>(),
+                "project": project_id,
+                "capabilities": authority.capabilities.iter().map(|capability| capability.as_wire()).collect::<Vec<_>>(),
+                "authority_generation": authority.authority_generation,
                 "expires_at": session.expires_at,
                 "csrf_token": session.csrf_token,
             });
@@ -635,25 +704,14 @@ mod tests {
             email: None,
         };
 
-        let response = auth_session(State(state.clone()), headers.clone(), None)
+        let response = auth_session(State(state.clone()), headers.clone(), None, None)
             .await
             .into_response();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["project_id"], "project-42");
-        assert_eq!(json["expires_at"], expires_at);
-        assert_eq!(json["csrf_token"], "csrf-token");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-        let response = auth_session(State(state), headers, Some(Extension(auth)))
+        let response = auth_session(State(state), headers, Some(Extension(auth)), None)
             .await
             .into_response();
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["project_id"], "project-42");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

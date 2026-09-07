@@ -19,6 +19,7 @@ import type { GatewayLoadout } from '@/lib/types/gateway'
 import { cn, getErrorMessage } from '@/lib/utils'
 import { LOADOUT_CAPABILITIES, LoadoutFormDialog } from './loadout-form-dialog'
 import { portableLoadoutFilename, portableLoadoutSource, type LoadoutExportTarget } from './loadout-portability'
+import { useBrowserSession } from '@/lib/auth/session'
 
 export function filterLoadouts(loadouts: GatewayLoadout[], query: string): GatewayLoadout[] {
   const needle = query.trim().toLocaleLowerCase()
@@ -48,6 +49,9 @@ function downloadLoadout(loadout: GatewayLoadout, target: LoadoutExportTarget) {
 }
 
 export function LoadoutsPageContent() {
+  const session = useBrowserSession()
+  const canManage = session.status === 'authenticated'
+    && Boolean(session.authority?.capabilities.includes('scope.manage'))
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<GatewayLoadout | null>(null)
   const [deleting, setDeleting] = useState<GatewayLoadout | null>(null)
@@ -94,7 +98,7 @@ export function LoadoutsPageContent() {
     <AppHeader breadcrumbs={[{ label: 'Depot' }, { label: 'Library' }, { label: 'Loadouts' }]} />
     <div className={cn(AURORA_PAGE_SHELL, 'flex-1')}><div className={AURORA_PAGE_FRAME}>
       <LibraryTabs active="loadouts" />
-      <ConsoleHero eyebrow="Depot · Portable bundles" pulse={loadouts.length ? { color: 'var(--aurora-success)', label: loadouts.length + ' configured' } : undefined} title="Loadouts" stats={stats} actions={<div className="flex gap-2"><Button variant="outline" size="sm" disabled={isValidating} onClick={() => void refreshLoadouts()}><RefreshCw className={cn('size-4', isValidating && 'animate-spin')} />Refresh</Button><Button size="sm" onClick={() => { setEditing(null); setFormOpen(true) }}><Plus className="size-4" />New Loadout</Button></div>} />
+      <ConsoleHero eyebrow="Depot · Portable bundles" pulse={loadouts.length ? { color: 'var(--aurora-success)', label: loadouts.length + ' configured' } : undefined} title="Loadouts" stats={stats} actions={<div className="flex gap-2"><Button variant="outline" size="sm" disabled={isValidating} onClick={() => void refreshLoadouts()}><RefreshCw className={cn('size-4', isValidating && 'animate-spin')} />Refresh</Button>{canManage ? <Button size="sm" onClick={() => { setEditing(null); setFormOpen(true) }}><Plus className="size-4" />New Loadout</Button> : null}</div>} />
       <DashboardPanel title="Curate once, run anywhere" icon={<PackageOpen className="size-4" />} action={<Button variant="outline" size="sm" asChild><Link href="/create">Publish in Depot</Link></Button>}><p className={cn(AURORA_DENSE_META, 'text-aurora-text-muted')}>Bundle MCP servers and tools, plugins, prompts, resources, Skills, and Code Mode into one portable unit. Export the APM source directly or compile a target request for Claude Code, Codex, or Gemini CLI. Publishing is handled by Depot; a hosted MCP route is optional.</p></DashboardPanel>
       <div className="flex items-center justify-between gap-3"><div className="relative w-full max-w-xl"><Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-aurora-text-muted" /><Input aria-label="Search Loadouts" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search Loadouts, upstreams, and services…" className="pl-9" /></div><div className="flex shrink-0 rounded-aurora-1 border border-aurora-border-subtle bg-aurora-control-surface p-0.5">{([[Table2,'Table','table'],[List,'List','list'],[Grid2X2,'Cards','cards']] as const).map(([Icon,label,mode])=><button key={mode} type="button" aria-label={`${label} view`} title={`${label} view`} aria-pressed={view===mode} onClick={()=>setView(mode)} className="rounded p-1.5 text-aurora-text-muted hover:text-aurora-text-primary aria-pressed:bg-aurora-selected-bg aria-pressed:text-aurora-accent-primary"><Icon className="size-3.5"/></button>)}</div></div>
       {protectedRoutesError && <div role="alert" className="rounded-lg border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm text-aurora-text-primary">Could not verify protected route mounts. Editing and removal are disabled to prevent applying the wrong update mode. {getErrorMessage(protectedRoutesError, 'Protected routes failed to load')}</div>}
@@ -106,7 +110,7 @@ export function LoadoutsPageContent() {
       : <div className={cn('grid gap-3', view === 'cards' && 'xl:grid-cols-2', view === 'table' && 'gap-1')}>{visibleLoadouts.map(loadout => {
         const mounts = mountedBy.get(loadout.name) ?? []
         const caps = LOADOUT_CAPABILITIES.filter(([key]) => loadout[key])
-        const routeStateUnavailable = protectedRoutesLoading || Boolean(protectedRoutesError)
+        const routeStateUnavailable = !canManage || protectedRoutesLoading || Boolean(protectedRoutesError)
         return <DashboardPanel key={loadout.name} title={loadout.name} icon={<Boxes className="size-4" />} meta={loadout.restart_required ? 'restart required' : `${loadout.upstreams.length + loadout.services.length} portable references`} action={<div className="flex gap-1"><Button variant="ghost" size="icon-sm" aria-label={'Copy ' + loadout.name + ' APM source'} onClick={async () => { try { await navigator.clipboard.writeText(portableLoadoutSource(loadout)); toast.success('Copied ' + loadout.name + ' APM source.') } catch (e) { toast.error(getErrorMessage(e, 'Could not copy Loadout source')) } }}><Clipboard className="size-3.5" /></Button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="sm" aria-label={'Export ' + loadout.name}><Download className="size-3.5" />Export<ChevronDown className="size-3" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">{EXPORT_TARGETS.map(([target, label]) => <DropdownMenuItem key={target} onSelect={() => downloadLoadout(loadout, target)}><Download />{label}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu><Button variant="ghost" size="icon-sm" aria-label={'Edit ' + loadout.name} disabled={routeStateUnavailable || loadout.pending_operation === 'remove'} onClick={() => { setEditing(loadout); setFormOpen(true) }}><Pencil className="size-3.5" /></Button><Button variant="ghost" size="icon-sm" aria-label={'Remove ' + loadout.name} disabled={routeStateUnavailable || loadout.pending_operation === 'remove'} onClick={() => setDeleting(loadout)}><Trash2 className="size-3.5" /></Button></div>}>
           {loadout.description && <p className={cn(AURORA_DENSE_META, 'text-aurora-text-muted')}>{loadout.description}</p>}
           <div className="flex flex-wrap gap-2">{loadout.restart_required && <Badge variant="outline" className="border-aurora-warning/50 text-aurora-warning">Restart · {loadout.pending_operation ?? 'update'}</Badge>}{caps.map(([key, label, , Icon]) => <Badge key={key} variant="secondary" className="gap-1"><Icon className="size-3" />{label}</Badge>)}</div>

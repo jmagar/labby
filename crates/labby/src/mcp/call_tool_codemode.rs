@@ -584,6 +584,15 @@ impl LabMcpServer {
             );
             return Ok(error_result_from_envelope(envelope));
         };
+        if !self.route_team_credentials_current().await {
+            let envelope = build_error(
+                service,
+                "call_tool",
+                "forbidden",
+                "Gateway credential is unavailable",
+            );
+            return Ok(error_result_from_envelope(envelope));
+        }
         let config = manager.code_mode_config().await;
         let max_source_bytes = config.max_source_bytes.min(MAX_SOURCE_BYTES);
         let code = match code_arg(args, max_source_bytes) {
@@ -641,7 +650,12 @@ impl LabMcpServer {
             None => CodeModeCaller::TrustedLocal,
             Some(auth) => {
                 let capabilities = code_mode_capabilities_for_scopes(&auth.scopes);
-                let sub = self.request_subject(context).map(ToOwned::to_owned);
+                let sub = self
+                    .route_oauth_subject(
+                        self.request_subject(context)
+                            .map(std::borrow::Cow::Borrowed),
+                    )
+                    .map(std::borrow::Cow::into_owned);
                 if let (Some(provider_token), Some(provider_request_id)) = (
                     self.request_host_provider_token(context),
                     self.request_host_provider_request_id(context),

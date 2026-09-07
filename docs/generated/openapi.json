@@ -282,6 +282,162 @@
         }
       }
     },
+    "/v1/access": {
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Dispatch action to access",
+        "description": "Execute an action on the access service. Use `action: \"help\"` to list available actions. Actions whose schema reports `requires_admin: true` require the `lab:admin` scope. Every non-2xx response uses AgentErrorResponse; follow `recovery.guidance` and do not repeat requests unchanged when `side_effects` is `possible` or `unknown`.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful action response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown action or malformed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing, invalid, or must be renewed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated caller lacks required scope or policy permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Requested service, action target, or upstream was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict, ambiguity, stale state, or restart required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request or generated content exceeds the configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation, confirmation, path-safety, or tool-execution error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit or queue saturation; honor recovery.retry_after_ms when present",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure requiring diagnostic inspection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream gateway, provider, OAuth-resource, or transport failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service or provider temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Operation timed out; use recovery guidance before retrying",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/access/bootstrap-owner": {
       "post": {
         "tags": [
@@ -477,6 +633,162 @@
         "x-labby-cache-posture": "private, no-store",
         "x-labby-failure-disclosure": "uniform non-enumerating denial",
         "x-labby-side-effects": "immediate credential revocation; exact retry idempotent"
+      }
+    },
+    "/v1/agents": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Dispatch action to agents",
+        "description": "Execute an action on the agents service. Use `action: \"help\"` to list available actions. Actions whose schema reports `requires_admin: true` require the `lab:admin` scope. Every non-2xx response uses AgentErrorResponse; follow `recovery.guidance` and do not repeat requests unchanged when `side_effects` is `possible` or `unknown`.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentsActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful action response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown action or malformed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing, invalid, or must be renewed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated caller lacks required scope or policy permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Requested service, action target, or upstream was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict, ambiguity, stale state, or restart required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request or generated content exceeds the configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation, confirmation, path-safety, or tool-execution error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit or queue saturation; honor recovery.retry_after_ms when present",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure requiring diagnostic inspection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream gateway, provider, OAuth-resource, or transport failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service or provider temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Operation timed out; use recovery guidance before retrying",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
       }
     },
     "/v1/apps/manifest": {
@@ -839,6 +1151,162 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/BundlesActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful action response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown action or malformed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing, invalid, or must be renewed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated caller lacks required scope or policy permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Requested service, action target, or upstream was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict, ambiguity, stale state, or restart required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request or generated content exceeds the configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation, confirmation, path-safety, or tool-execution error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit or queue saturation; honor recovery.retry_after_ms when present",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure requiring diagnostic inspection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream gateway, provider, OAuth-resource, or transport failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service or provider temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Operation timed out; use recovery guidance before retrying",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/dev_containers": {
+      "post": {
+        "tags": [
+          "dev_containers"
+        ],
+        "summary": "Dispatch action to dev_containers",
+        "description": "Execute an action on the dev_containers service. Use `action: \"help\"` to list available actions. Actions whose schema reports `requires_admin: true` require the `lab:admin` scope. Every non-2xx response uses AgentErrorResponse; follow `recovery.guidance` and do not repeat requests unchanged when `side_effects` is `possible` or `unknown`.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Dev_containersActionRequest"
               }
             }
           },
@@ -4183,6 +4651,162 @@
         ]
       }
     },
+    "/v1/tasks": {
+      "post": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Dispatch action to tasks",
+        "description": "Execute an action on the tasks service. Use `action: \"help\"` to list available actions. Actions whose schema reports `requires_admin: true` require the `lab:admin` scope. Every non-2xx response uses AgentErrorResponse; follow `recovery.guidance` and do not repeat requests unchanged when `side_effects` is `possible` or `unknown`.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TasksActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful action response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown action or malformed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing, invalid, or must be renewed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated caller lacks required scope or policy permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Requested service, action target, or upstream was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict, ambiguity, stale state, or restart required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request or generated content exceeds the configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation, confirmation, path-safety, or tool-execution error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit or queue saturation; honor recovery.retry_after_ms when present",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure requiring diagnostic inspection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream gateway, provider, OAuth-resource, or transport failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service or provider temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Operation timed out; use recovery guidance before retrying",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/uploads": {
       "post": {
         "tags": [
@@ -4342,6 +4966,268 @@
   },
   "components": {
     "schemas": {
+      "AccessAccessGateway_credentialBindParams": {
+        "type": "object",
+        "required": [
+          "team_id",
+          "upstream_name",
+          "binding_id"
+        ],
+        "properties": {
+          "binding_id": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "upstream_name": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessAccessGateway_credentialListParams": {
+        "type": "object",
+        "required": [
+          "team_id"
+        ],
+        "properties": {
+          "team_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessAccessGateway_credentialRevokeParams": {
+        "type": "object",
+        "required": [
+          "team_id",
+          "upstream_name"
+        ],
+        "properties": {
+          "team_id": {
+            "type": "string"
+          },
+          "upstream_name": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessAccessPlatform_adminGrantParams": {
+        "type": "object",
+        "required": [
+          "principal_id"
+        ],
+        "properties": {
+          "principal_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessAccessPlatform_adminRevokeParams": {
+        "type": "object",
+        "required": [
+          "principal_id"
+        ],
+        "properties": {
+          "principal_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessAccessTeamActivateParams": {
+        "type": "object",
+        "required": [
+          "team_id"
+        ],
+        "properties": {
+          "team_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessAccessTeamCreateParams": {
+        "type": "object",
+        "required": [
+          "team_id",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessAccessTeamMemberAddParams": {
+        "type": "object",
+        "required": [
+          "team_id",
+          "principal_id",
+          "role"
+        ],
+        "properties": {
+          "principal_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessAccessTeamMemberRemoveParams": {
+        "type": "object",
+        "required": [
+          "team_id",
+          "principal_id"
+        ],
+        "properties": {
+          "principal_id": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessAccessTeamMemberRoleSetParams": {
+        "type": "object",
+        "required": [
+          "team_id",
+          "principal_id",
+          "role"
+        ],
+        "properties": {
+          "principal_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessAccessTeamMemberSuspendParams": {
+        "type": "object",
+        "required": [
+          "team_id",
+          "principal_id"
+        ],
+        "properties": {
+          "principal_id": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessAccessTeamSuspendParams": {
+        "type": "object",
+        "required": [
+          "team_id"
+        ],
+        "properties": {
+          "team_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessAccessTeam_invitationAcceptParams": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessAccessTeam_invitationCreateParams": {
+        "type": "object",
+        "required": [
+          "team_id",
+          "principal_id",
+          "role",
+          "token",
+          "ttl_seconds"
+        ],
+        "properties": {
+          "principal_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "type": "integer"
+          }
+        }
+      },
+      "AccessAccessTeam_projectAssignParams": {
+        "type": "object",
+        "required": [
+          "team_id",
+          "project_id",
+          "role"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "team_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AccessActionRequest": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "access.team.create",
+              "access.team.list",
+              "access.team.member.add",
+              "access.team.member.role.set",
+              "access.team.member.suspend",
+              "access.team.member.remove",
+              "access.team.suspend",
+              "access.team.activate",
+              "access.team_invitation.create",
+              "access.team_invitation.accept",
+              "access.team_project.assign",
+              "access.gateway_credential.list",
+              "access.gateway_credential.bind",
+              "access.gateway_credential.revoke",
+              "access.project.effective.list",
+              "access.platform_admin.grant",
+              "access.platform_admin.revoke"
+            ]
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      },
       "AccessBootstrapOwnerRequest": {
         "type": "object",
         "required": [
@@ -4538,6 +5424,154 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "AgentsActionRequest": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "agents.create",
+              "agents.list",
+              "agents.get",
+              "agents.update",
+              "agents.suspend",
+              "agents.delete",
+              "agents.run",
+              "agents.session.status"
+            ]
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      },
+      "AgentsAgentsCreateParams": {
+        "type": "object",
+        "required": [
+          "agent_id",
+          "owner_kind",
+          "owner_id",
+          "content_digest",
+          "repository_digest",
+          "image_digest",
+          "harness_digest",
+          "loadout_digest",
+          "catalog_generation"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "catalog_generation": {
+            "type": "string"
+          },
+          "content_digest": {
+            "type": "string"
+          },
+          "harness_digest": {
+            "type": "string"
+          },
+          "image_digest": {
+            "type": "string"
+          },
+          "loadout_digest": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "type": "string"
+          },
+          "repository_digest": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentsAgentsDeleteParams": {
+        "type": "object",
+        "required": [
+          "agent_id"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentsAgentsGetParams": {
+        "type": "object",
+        "required": [
+          "agent_id"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentsAgentsListParams": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentsAgentsRunParams": {
+        "type": "object",
+        "required": [
+          "agent_id"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentsAgentsSessionStatusParams": {
+        "type": "object",
+        "required": [
+          "agent_id",
+          "session_id"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentsAgentsSuspendParams": {
+        "type": "object",
+        "required": [
+          "agent_id"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentsAgentsUpdateParams": {
+        "type": "object",
+        "required": [
+          "agent_id"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string"
           }
         }
       },
@@ -5930,6 +6964,118 @@
           }
         }
       },
+      "Dev_containersActionRequest": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "dev_containers.create",
+              "dev_containers.list",
+              "dev_containers.start",
+              "dev_containers.stop",
+              "dev_containers.destroy",
+              "dev_containers.reconcile"
+            ]
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      },
+      "Dev_containersDev_containersCreateParams": {
+        "type": "object",
+        "required": [
+          "instance_id",
+          "template_id",
+          "owner_kind",
+          "owner_id"
+        ],
+        "properties": {
+          "instance_id": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "type": "string",
+            "enum": [
+              "installation",
+              "team",
+              "project",
+              "personal"
+            ]
+          },
+          "secret_references": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "template_id": {
+            "type": "string"
+          }
+        }
+      },
+      "Dev_containersDev_containersDestroyParams": {
+        "type": "object",
+        "required": [
+          "instance_id"
+        ],
+        "properties": {
+          "instance_id": {
+            "type": "string"
+          }
+        }
+      },
+      "Dev_containersDev_containersListParams": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "string"
+          }
+        }
+      },
+      "Dev_containersDev_containersReconcileParams": {
+        "type": "object",
+        "required": [
+          "instance_id"
+        ],
+        "properties": {
+          "instance_id": {
+            "type": "string"
+          }
+        }
+      },
+      "Dev_containersDev_containersStartParams": {
+        "type": "object",
+        "required": [
+          "instance_id"
+        ],
+        "properties": {
+          "instance_id": {
+            "type": "string"
+          }
+        }
+      },
+      "Dev_containersDev_containersStopParams": {
+        "type": "object",
+        "required": [
+          "instance_id"
+        ],
+        "properties": {
+          "instance_id": {
+            "type": "string"
+          }
+        }
+      },
       "DoctorActionRequest": {
         "type": "object",
         "required": [
@@ -7184,6 +8330,17 @@
           "status"
         ],
         "properties": {
+          "authority_projection": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ManagedProjectionReadiness",
+                "description": "Structured, non-secret state for the managed Depot authority projection."
+              }
+            ]
+          },
           "capability_profile": {
             "type": [
               "string",
@@ -7391,6 +8548,54 @@
           "expires_at": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "ManagedProjectionReadiness": {
+        "type": "object",
+        "required": [
+          "managed",
+          "ready",
+          "stale",
+          "lag",
+          "gap"
+        ],
+        "properties": {
+          "gap": {
+            "type": "boolean"
+          },
+          "key_generation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lag": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "managed": {
+            "type": "boolean"
+          },
+          "pending": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "watermark": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -8262,6 +9467,16 @@
         "properties": {
           "file_id": {
             "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team"
+            ]
           }
         }
       },
@@ -8277,6 +9492,16 @@
           },
           "grantee_principal_id": {
             "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team"
+            ]
           }
         }
       },
@@ -8294,6 +9519,16 @@
           },
           "limit": {
             "type": "integer"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team"
+            ]
           }
         }
       },
@@ -8309,6 +9544,16 @@
           },
           "grant_id": {
             "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team"
+            ]
           }
         }
       },
@@ -8320,6 +9565,16 @@
           },
           "limit": {
             "type": "integer"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team"
+            ]
           }
         }
       },
@@ -8331,6 +9586,16 @@
         "properties": {
           "file_id": {
             "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team"
+            ]
           }
         }
       },
@@ -8346,6 +9611,16 @@
           },
           "file_id": {
             "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team"
+            ]
           }
         }
       },
@@ -8361,8 +9636,33 @@
           "limit": {
             "type": "integer"
           },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team"
+            ]
+          },
           "query": {
             "type": "string"
+          }
+        }
+      },
+      "StashStashStatsParams": {
+        "type": "object",
+        "properties": {
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team"
+            ]
           }
         }
       },
@@ -8408,6 +9708,114 @@
             "type": "string"
           },
           "uri": {
+            "type": "string"
+          }
+        }
+      },
+      "TasksActionRequest": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "tasks.create",
+              "tasks.list",
+              "tasks.get",
+              "tasks.queue",
+              "tasks.cancel",
+              "tasks.result"
+            ]
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      },
+      "TasksTasksCancelParams": {
+        "type": "object",
+        "required": [
+          "task_id"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TasksTasksCreateParams": {
+        "type": "object",
+        "required": [
+          "task_id",
+          "idempotency_key",
+          "owner_kind",
+          "owner_id",
+          "agent_id",
+          "input_digest"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "input_digest": {
+            "type": "string"
+          },
+          "owner_id": {
+            "type": "string"
+          },
+          "owner_kind": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TasksTasksGetParams": {
+        "type": "object",
+        "required": [
+          "task_id"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TasksTasksListParams": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "string"
+          }
+        }
+      },
+      "TasksTasksQueueParams": {
+        "type": "object",
+        "required": [
+          "task_id"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TasksTasksResultParams": {
+        "type": "object",
+        "required": [
+          "task_id"
+        ],
+        "properties": {
+          "task_id": {
             "type": "string"
           }
         }

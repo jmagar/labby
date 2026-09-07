@@ -121,11 +121,15 @@ async fn upload_bytes(
             message: "Artifact uploads require project context".to_owned(),
             required_scopes: vec!["lab:admin".to_owned()],
         })?;
+    let selected_team_id = headers
+        .get("x-labby-team-id")
+        .and_then(|value| value.to_str().ok());
     let context = authorize_authority_context(
         &state.access_runtime,
         identity.map(|Extension(identity)| identity),
         Some(project_id),
-        Permission::AssetUse,
+        selected_team_id,
+        Permission::ProjectManage,
     )
     .await?;
     let request_id = headers
@@ -151,14 +155,37 @@ async fn upload_bytes(
         message: "Artifact upload queue is unavailable".to_owned(),
     })?;
     tracing::info!(surface = "api", service = "uploads", action = "uploads.put", request_id, actor_id = %context.actor_id, project_id = %context.project_id, "remote upload started");
-    let stream = Limited::new(body, MAX_UPLOAD_BYTES).into_data_stream();
+    let bytes = Limited::new(body, MAX_UPLOAD_BYTES)
+        .collect()
+        .await
+        .map_err(|_| crate::dispatch::error::ToolError::InvalidParam {
+            message: "Artifact upload exceeds 50000000 bytes or could not be read".to_owned(),
+            param: "body".to_owned(),
+        })?
+        .to_bytes();
+    let actual_length = u64::try_from(bytes.len()).map_err(|_| {
+        crate::dispatch::error::ToolError::InvalidParam {
+            message: "Artifact upload length is invalid".to_owned(),
+            param: "body".to_owned(),
+        }
+    })?;
+    if content_length.is_some_and(|declared| declared != actual_length) {
+        return Err(crate::dispatch::error::ToolError::InvalidParam {
+            message: "Artifact upload content length does not match its body".to_owned(),
+            param: "content-length".to_owned(),
+        }
+        .into());
+    }
+    use sha2::Digest as _;
+    let content_digest = format!("sha256:{}", hex::encode(sha2::Sha256::digest(&bytes)));
     let result = controls
         .upload(
             query.connection_id.as_deref(),
             &id,
-            reqwest::Body::wrap_stream(stream),
-            content_length,
+            reqwest::Body::from(bytes),
+            Some(actual_length),
             content_type,
+            &content_digest,
             &context,
         )
         .await;
@@ -228,6 +255,10 @@ async fn handle(
         .get("x-labby-project-id")
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
+    let selected_team_id = headers
+        .get("x-labby-team-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
     let request_headers = headers.clone();
     let request_auth = auth.clone();
     handle_action_with_meta(
@@ -244,11 +275,13 @@ async fn handle(
             let spec = crate::dispatch::remote_control::actions(service)
                 .iter()
                 .find(|candidate| candidate.name == action);
-            let permission = if spec.is_some_and(|spec| spec.requires_admin) {
-                Permission::AssetUse
-            } else {
-                Permission::AssetDiscover
-            };
+            let operation = crate::dispatch::remote_control::operation(service, &action)
+                .ok_or_else(|| crate::dispatch::error::ToolError::UnknownAction {
+                    message: format!("Unknown action: {action}"),
+                    valid: Vec::new(),
+                    hint: None,
+                })?;
+            let permission = crate::dispatch::artifact_control::operation_permission(operation);
             if spec.is_some_and(|spec| spec.requires_admin) {
                 require_session_csrf(
                     &action,
@@ -260,6 +293,7 @@ async fn handle(
                 &state.access_runtime,
                 identity,
                 project_id.as_deref(),
+                selected_team_id.as_deref(),
                 permission,
             )
             .await?;
@@ -287,6 +321,7 @@ pub(crate) async fn authorize_authority_context(
     runtime: &crate::access::AccessRuntime,
     identity: Option<VerifiedIdentity>,
     project_id: Option<&str>,
+    selected_team_id: Option<&str>,
     permission: Permission,
 ) -> Result<crate::dispatch::artifact_control::AuthorityContext, crate::dispatch::error::ToolError>
 {
@@ -301,7 +336,11 @@ pub(crate) async fn authorize_authority_context(
             required_scopes: vec!["lab:read".to_owned()],
         })?;
     crate::dispatch::artifact_control::authorize_authority_context(
-        runtime, identity, project_id, permission,
+        runtime,
+        identity,
+        project_id,
+        selected_team_id,
+        permission,
     )
     .await
 }

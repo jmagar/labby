@@ -1,5 +1,43 @@
 [
   {
+    "name": "access",
+    "display_name": "access",
+    "description": "Manage teams, memberships, invitations, and project assignments",
+    "category": "administration",
+    "status": "available",
+    "feature": null,
+    "exposure": "always_on",
+    "surfaces": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "default_port": null,
+    "docs_url": null,
+    "supports_multi_instance": false,
+    "metadata_source": "registry synthetic metadata"
+  },
+  {
+    "name": "agents",
+    "display_name": "agents",
+    "description": "Create, manage, and run owner-scoped Agents",
+    "category": "automation",
+    "status": "available",
+    "feature": null,
+    "exposure": "always_on",
+    "surfaces": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "default_port": null,
+    "docs_url": null,
+    "supports_multi_instance": false,
+    "metadata_source": "registry synthetic metadata"
+  },
+  {
     "name": "artifacts",
     "display_name": "artifacts",
     "description": "Search, import, revise, validate, and activate durable Artifacts",
@@ -50,6 +88,25 @@
       "mcp": true,
       "api": true,
       "web_ui": true
+    },
+    "default_port": null,
+    "docs_url": null,
+    "supports_multi_instance": false,
+    "metadata_source": "registry synthetic metadata"
+  },
+  {
+    "name": "dev_containers",
+    "display_name": "dev_containers",
+    "description": "Create and manage isolated development containers",
+    "category": "administration",
+    "status": "available",
+    "feature": null,
+    "exposure": "always_on",
+    "surfaces": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
     },
     "default_port": null,
     "docs_url": null,
@@ -259,6 +316,25 @@
       "mcp": true,
       "api": true,
       "web_ui": true
+    },
+    "default_port": null,
+    "docs_url": null,
+    "supports_multi_instance": false,
+    "metadata_source": "registry synthetic metadata"
+  },
+  {
+    "name": "tasks",
+    "display_name": "tasks",
+    "description": "Create and operate owner-scoped Agent Tasks",
+    "category": "automation",
+    "status": "available",
+    "feature": null,
+    "exposure": "always_on",
+    "surfaces": {
+      "cli": true,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
     },
     "default_port": null,
     "docs_url": null,

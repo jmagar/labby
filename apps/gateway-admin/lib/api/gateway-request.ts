@@ -1,4 +1,5 @@
-import { getSessionCsrfToken, getSessionProjectId } from '../auth/session.ts'
+import { beginAuthorityRequest } from '../auth/authority-context.ts'
+import { getBrowserSessionEpoch, getSessionAuthority, getSessionCsrfToken, getSessionProjectId } from '../auth/session-store.ts'
 
 export function gatewayHeaders(
   _token?: string,
@@ -17,7 +18,21 @@ export function gatewayHeaders(
   if (projectId) {
     headers['x-labby-project-id'] = projectId
   }
+  const teamId = getSessionAuthority()?.activeTeamId
+  if (teamId) headers['x-labby-team-id'] = teamId
   return headers
+}
+
+export function captureGatewayAuthority(signal?: AbortSignal, connectionId = 'local') {
+  const authority = getSessionAuthority()
+  if (!authority) throw new DOMException('Authority is unavailable', 'InvalidStateError')
+  return beginAuthorityRequest(authority, getBrowserSessionEpoch(), connectionId, signal)
+}
+
+export function assertGatewayAuthorityCurrent(generation: number) {
+  if (generation !== getBrowserSessionEpoch()) {
+    throw new DOMException('Authority context changed', 'AbortError')
+  }
 }
 
 export function confirmGatewayParams<T extends object>(params: T): T & { confirm: true } {

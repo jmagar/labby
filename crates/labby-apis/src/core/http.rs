@@ -368,6 +368,29 @@ impl HttpClient {
         Self::decode_bounded(resp, &ctx, max_bytes).await
     }
 
+    /// POST JSON with request-local headers and decode a bounded response.
+    pub async fn post_json_bounded_with_headers<
+        B: serde::Serialize + Sync,
+        T: serde::de::DeserializeOwned,
+    >(
+        &self,
+        path: &str,
+        body: &B,
+        headers: reqwest::header::HeaderMap,
+        max_bytes: usize,
+    ) -> Result<T, ApiError> {
+        let url = Url::parse(&self.url(path)?)
+            .map_err(|e| ApiError::Internal(format!("invalid url: {e}")))?;
+        let ctx = RequestLogContext::new("POST", &url);
+        let resp = self
+            .send(
+                self.apply_auth(self.inner.post(url.clone()).headers(headers).json(body)),
+                &ctx,
+            )
+            .await?;
+        Self::decode_bounded(resp, &ctx, max_bytes).await
+    }
+
     /// PUT a JSON body and decode the JSON response.
     ///
     /// # Errors
@@ -458,6 +481,31 @@ impl HttpClient {
         let mut request = self
             .inner
             .put(url.clone())
+            .header(reqwest::header::CONTENT_TYPE, content_type);
+        if let Some(content_length) = content_length {
+            request = request.header(reqwest::header::CONTENT_LENGTH, content_length);
+        }
+        let resp = self.send(self.apply_auth(request.body(body)), &ctx).await?;
+        Self::decode_bounded(resp, &ctx, max_response_bytes).await
+    }
+
+    /// PUT an owned body with request-local headers and decode a bounded response.
+    pub async fn put_body_bounded_with_headers<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        body: reqwest::Body,
+        content_length: Option<u64>,
+        content_type: &str,
+        headers: reqwest::header::HeaderMap,
+        max_response_bytes: usize,
+    ) -> Result<T, ApiError> {
+        let url = Url::parse(&self.url(path)?)
+            .map_err(|e| ApiError::Internal(format!("invalid url: {e}")))?;
+        let ctx = RequestLogContext::new("PUT", &url);
+        let mut request = self
+            .inner
+            .put(url.clone())
+            .headers(headers)
             .header(reqwest::header::CONTENT_TYPE, content_type);
         if let Some(content_length) = content_length {
             request = request.header(reqwest::header::CONTENT_LENGTH, content_length);

@@ -31,8 +31,9 @@ pub use materialize_skill::{
 pub use library::{
     LibraryActorId, LibraryAuditIntent, LibraryAuthorization, LibraryDurableAudit, LibraryGrant,
     LibraryIdempotency, LibraryMutation, LibraryMutationOutcome, LibraryMutationReceiptFacts,
-    LibraryOwnership, LibraryReceipt, LibrarySnapshot, LibraryTenantId, LibraryTimestamp,
-    SkillLibraryFile, SkillLibraryRecord, SkillTransactionBoundary, SkillVisibility,
+    LibraryOwnerKind, LibraryOwnership, LibraryReceipt, LibrarySnapshot, LibraryTenantId,
+    LibraryTimestamp, SkillLibraryFile, SkillLibraryRecord, SkillTransactionBoundary,
+    SkillVisibility, qualify_materialized_skill_owner,
 };
 pub use lifecycle::{
     ArtifactChangeKind, ArtifactComponentChange, ArtifactRevisionDiff, ArtifactUpdatePlan,

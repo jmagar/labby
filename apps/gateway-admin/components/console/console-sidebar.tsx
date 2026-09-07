@@ -22,12 +22,12 @@ import { useTheme } from 'next-themes'
 import { LabbyIcon } from '@/components/labby-icon'
 import { useConsoleShell } from '@/components/console/console-shell-context'
 import {
-  consoleNavSections,
+  capabilityAwareNavSections,
   isNavItemActive,
   type ConsoleNavItem,
 } from '@/components/console/nav-model'
 import { sessionPrimaryEmail } from '@/lib/auth/session-presenter'
-import { logoutBrowserSession, useBrowserSession } from '@/lib/auth/session'
+import { logoutBrowserSession, selectSessionWorkspace, useBrowserSession } from '@/lib/auth/session'
 
 const PINNED_KEY = 'labby-nav-pinned'
 const FOLDED_KEY = 'labby-nav-folded'
@@ -643,6 +643,12 @@ export function AccountMenu({ placement = 'sidebar' }: { placement?: 'sidebar' |
 export function ConsoleSidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const session = useBrowserSession()
+  const authority = session.status === 'authenticated' ? session.authority : undefined
+  const navSections = React.useMemo(
+    () => capabilityAwareNavSections(authority?.capabilities ?? []),
+    [authority?.capabilities],
+  )
   const { collapsed, toggleCollapsed, mobileNavOpen, setMobileNavOpen } = useConsoleShell()
   const [isMobile, setIsMobile] = React.useState(false)
 
@@ -721,7 +727,7 @@ export function ConsoleSidebar() {
       if (event.altKey || event.shiftKey) return
       const index = Number.parseInt(event.key, 10)
       if (Number.isNaN(index) || index < 1) return
-      const flat = consoleNavSections.flatMap((section) => section.items)
+      const flat = navSections.flatMap((section) => section.items)
       const target = flat[index - 1]
       if (!target) return
       event.preventDefault()
@@ -729,7 +735,7 @@ export function ConsoleSidebar() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [router])
+  }, [navSections, router])
 
   const togglePin = React.useCallback((id: string) => {
     setPinned((current) => {
@@ -750,7 +756,7 @@ export function ConsoleSidebar() {
   }, [])
 
   const orderedItems = React.useCallback(
-    (section: (typeof consoleNavSections)[number]) => {
+    (section: (typeof navSections)[number]) => {
       const ids = section.items.map((item) => item.id)
       const saved = (order[section.id] ?? []).filter((id) => ids.includes(id))
       const sequence = [...saved, ...ids.filter((id) => !saved.includes(id))]
@@ -772,7 +778,7 @@ export function ConsoleSidebar() {
       const drag = dragRef.current
       dragRef.current = null
       if (!drag || drag.section !== sectionId || drag.id === targetId) return
-      const section = consoleNavSections.find((entry) => entry.id === sectionId)
+      const section = navSections.find((entry) => entry.id === sectionId)
       if (!section) return
       const ids = section.items.map((item) => item.id)
       const saved = (order[sectionId] ?? []).filter((id) => ids.includes(id))
@@ -784,7 +790,7 @@ export function ConsoleSidebar() {
       writeJson(ORDER_KEY, next)
       setOrder(next)
     },
-    [order],
+    [navSections, order],
   )
 
   return (
@@ -961,11 +967,13 @@ export function ConsoleSidebar() {
             }}
           >
             <span style={{ width: 27, height: 27, borderRadius: 999, display: 'grid', placeItems: 'center', flexShrink: 0, overflow: 'hidden', border: '1px solid color-mix(in srgb,var(--aurora-accent-primary) 45%,transparent)', boxShadow: '0 0 8px rgba(244,114,182,.16)' }}><img src="/labby-avatar.png" alt="" style={{ width: '100%', height: '100%', borderRadius: 999, objectFit: 'cover' }}/></span>
-            {visuallyCollapsed ? null : <><span style={{ minWidth: 0, flex: 1, lineHeight: 1.08 }}><small style={{ display: 'block', fontSize: 8.5, fontWeight: 750, letterSpacing: '.12em', color: 'var(--aurora-text-muted)' }}>WORKSPACE</small><strong style={{ display: 'block', fontSize: 12.5 }}>Personal</strong></span><ChevronsUpDown size={13} color="var(--aurora-text-muted)"/></>}
+            {visuallyCollapsed ? null : <><span style={{ minWidth: 0, flex: 1, lineHeight: 1.08 }}><small style={{ display: 'block', fontSize: 8.5, fontWeight: 750, letterSpacing: '.12em', color: 'var(--aurora-text-muted)' }}>WORKSPACE · {authority?.activeOwner.kind?.toUpperCase() ?? 'UNAVAILABLE'}</small><strong style={{ display: 'block', fontSize: 12.5 }}>{authority?.activeOwner.id ?? 'No workspace'}</strong></span><ChevronsUpDown size={13} color="var(--aurora-text-muted)"/></>}
           </button>
           {workspaceOpen && !visuallyCollapsed ? <div data-anim="menu" style={{ position: 'absolute', zIndex: 60, top: 51, left: 6, right: 6, padding: 5, borderRadius: 11, border: '1px solid var(--aurora-border-strong)', background: 'linear-gradient(180deg, #173549, #102939)', boxShadow: 'var(--aurora-shadow-strong), inset 0 1px 0 rgba(255,255,255,.05)' }}>
-            <button type="button" data-menurow="1" onClick={() => setWorkspaceOpen(false)} style={{ width: '100%', display: 'grid', gridTemplateColumns: '30px 1fr 16px', alignItems: 'center', gap: 7, padding: '7px 8px', border: 0, borderRadius: 8, background: 'var(--aurora-selected-bg)', color: 'var(--aurora-text-primary)', textAlign: 'left', cursor: 'pointer' }}><span style={{ width: 28, height: 28, borderRadius: 999, display: 'grid', placeItems: 'center', overflow: 'hidden' }}><img src="/labby-avatar.png" alt="" style={{ width: '100%', height: '100%', borderRadius: 999, objectFit: 'cover' }}/></span><span><strong style={{ display: 'block', fontSize: 12.5 }}>Personal</strong><small style={{ display: 'block', maxWidth: 125, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--aurora-text-muted)' }}>your artifacts, agents and loadouts</small></span><Check size={14} color="var(--aurora-accent-strong)"/></button>
-            <button type="button" data-menurow="1" onClick={() => setWorkspaceOpen(false)} style={{ width: '100%', display: 'grid', gridTemplateColumns: '30px 1fr', alignItems: 'center', gap: 7, padding: '7px 8px', border: 0, borderRadius: 8, background: 'transparent', color: 'var(--aurora-text-primary)', textAlign: 'left', cursor: 'pointer' }}><span style={{ width: 27, height: 27, borderRadius: 7, display: 'grid', placeItems: 'center', background: 'color-mix(in srgb,var(--aurora-success) 12%,transparent)', border: '1px solid color-mix(in srgb,var(--aurora-success) 30%,transparent)', color: 'var(--aurora-success)', fontSize: 10 }}>TO</span><span><strong style={{ display: 'block', fontSize: 12.5 }}>tootie.tv</strong><small style={{ color: 'var(--aurora-text-muted)' }}>9 members · hosted Labby</small></span></button>
+            <button type="button" data-menurow="1" onClick={() => { selectSessionWorkspace({}); setWorkspaceOpen(false); router.push('/') }} style={{ width: '100%', display: 'grid', gridTemplateColumns: '30px 1fr 16px', alignItems: 'center', gap: 7, padding: '7px 8px', border: 0, borderRadius: 8, background: authority?.activeOwner.kind === 'personal' ? 'var(--aurora-selected-bg)' : 'transparent', color: 'var(--aurora-text-primary)', textAlign: 'left', cursor: 'pointer' }}><span style={{ width: 28, height: 28, borderRadius: 999, display: 'grid', placeItems: 'center', overflow: 'hidden' }}><img src="/labby-avatar.png" alt="" style={{ width: '100%', height: '100%', borderRadius: 999, objectFit: 'cover' }}/></span><span><strong style={{ display: 'block', fontSize: 12.5 }}>Personal</strong><small style={{ display: 'block', maxWidth: 125, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--aurora-text-muted)' }}>your private workspace</small></span>{authority?.activeOwner.kind === 'personal' ? <Check size={14} color="var(--aurora-accent-strong)"/> : null}</button>
+            {authority && authority.teams.length === 0 ? <p className="px-2 py-2 text-[11px] text-aurora-text-muted">You are not currently a member of a Team.</p> : null}
+            {authority?.teams.map((team) => <button key={team.id} type="button" data-menurow="1" onClick={() => { selectSessionWorkspace({ teamId: team.id }); setWorkspaceOpen(false); router.push('/') }} style={{ width: '100%', display: 'grid', gridTemplateColumns: '30px 1fr 16px', alignItems: 'center', gap: 7, padding: '7px 8px', border: 0, borderRadius: 8, background: authority.activeTeamId === team.id ? 'var(--aurora-selected-bg)' : 'transparent', color: 'var(--aurora-text-primary)', textAlign: 'left', cursor: 'pointer' }}><span style={{ width: 27, height: 27, borderRadius: 7, display: 'grid', placeItems: 'center', background: 'color-mix(in srgb,var(--aurora-success) 12%,transparent)', border: '1px solid color-mix(in srgb,var(--aurora-success) 30%,transparent)', color: 'var(--aurora-success)', fontSize: 10 }}>{team.id.slice(0,2).toUpperCase()}</span><span><strong style={{ display: 'block', fontSize: 12.5 }}>{team.id}</strong><small style={{ color: 'var(--aurora-text-muted)' }}>{team.role}</small></span>{authority.activeTeamId === team.id ? <Check size={14} color="var(--aurora-accent-strong)"/> : null}</button>)}
+            {authority?.projects.map((project) => <button key={project.id} type="button" data-menurow="1" onClick={() => { selectSessionWorkspace({ projectId: project.id }); setWorkspaceOpen(false); router.push('/') }} style={{ width: '100%', display: 'grid', gridTemplateColumns: '30px 1fr 16px', alignItems: 'center', gap: 7, padding: '7px 8px', border: 0, borderRadius: 8, background: authority.activeProjectId === project.id ? 'var(--aurora-selected-bg)' : 'transparent', color: 'var(--aurora-text-primary)', textAlign: 'left', cursor: 'pointer' }}><span style={{ width: 27, height: 27, borderRadius: 7, display: 'grid', placeItems: 'center', background: 'color-mix(in srgb,var(--aurora-accent-primary) 12%,transparent)', border: '1px solid color-mix(in srgb,var(--aurora-accent-primary) 30%,transparent)', color: 'var(--aurora-accent-primary)', fontSize: 10 }}>PR</span><span><strong style={{ display: 'block', fontSize: 12.5 }}>{project.id}</strong><small style={{ color: 'var(--aurora-text-muted)' }}>{project.role} · project</small></span>{authority.activeProjectId === project.id ? <Check size={14} color="var(--aurora-accent-strong)"/> : null}</button>)}
           </div> : null}
         </div>
 
@@ -984,7 +992,7 @@ export function ConsoleSidebar() {
             overflowX: 'visible',
           }}
         >
-          {consoleNavSections.map((section) => {
+          {navSections.map((section) => {
             const isFolded = Boolean(folded[section.id])
             const items = orderedItems(section)
 

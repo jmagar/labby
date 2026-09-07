@@ -686,6 +686,15 @@ fn normalize_loadout(loadout: &mut GatewayLoadoutConfig) -> Result<(), ToolError
         .filter(|value| !value.is_empty());
     loadout.upstreams = normalize_name_list(std::mem::take(&mut loadout.upstreams), "upstreams")?;
     loadout.services = normalize_name_list(std::mem::take(&mut loadout.services), "services")?;
+    for binding in &mut loadout.credential_bindings {
+        binding.upstream_name = binding.upstream_name.trim().to_owned();
+        binding.binding_id = binding.binding_id.trim().to_owned();
+    }
+    loadout.credential_bindings.sort_by(|left, right| {
+        left.upstream_name
+            .cmp(&right.upstream_name)
+            .then_with(|| left.binding_id.cmp(&right.binding_id))
+    });
     Ok(())
 }
 
@@ -697,6 +706,11 @@ fn validate_loadouts(cfg: &GatewayConfig) -> Result<(), ToolError> {
         .collect::<std::collections::HashSet<_>>();
     let mut names = std::collections::HashSet::new();
     for loadout in &cfg.loadouts {
+        let selected_upstreams = loadout
+            .upstreams
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
         if loadout.name.is_empty() {
             return Err(ToolError::InvalidParam {
                 message: "loadout name must not be empty".to_string(),
@@ -749,6 +763,40 @@ fn validate_loadouts(cfg: &GatewayConfig) -> Result<(), ToolError> {
                         loadout.name
                     ),
                     param: "upstreams".to_string(),
+                });
+            }
+        }
+        let mut credential_upstreams = std::collections::HashSet::new();
+        for binding in &loadout.credential_bindings {
+            if binding.generation == 0
+                || binding.binding_id.is_empty()
+                || binding.binding_id.len() > 256
+                || binding.binding_id.chars().any(char::is_control)
+            {
+                return Err(ToolError::InvalidParam {
+                    message: format!(
+                        "loadout `{}` has an invalid credential binding reference",
+                        loadout.name
+                    ),
+                    param: "credential_bindings".to_string(),
+                });
+            }
+            if !selected_upstreams.contains(binding.upstream_name.as_str()) {
+                return Err(ToolError::InvalidParam {
+                    message: format!(
+                        "loadout `{}` binds a credential for unselected upstream `{}`",
+                        loadout.name, binding.upstream_name
+                    ),
+                    param: "credential_bindings".to_string(),
+                });
+            }
+            if !credential_upstreams.insert(binding.upstream_name.as_str()) {
+                return Err(ToolError::InvalidParam {
+                    message: format!(
+                        "loadout `{}` has more than one credential binding for upstream `{}`",
+                        loadout.name, binding.upstream_name
+                    ),
+                    param: "credential_bindings".to_string(),
                 });
             }
         }

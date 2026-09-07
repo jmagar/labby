@@ -8,7 +8,9 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use base64::Engine as _;
-use labby_runtime::artifacts::{LibraryActorId, LibraryTenantId, SkillVisibility};
+use labby_runtime::artifacts::{
+    LibraryActorId, LibraryOwnerKind, LibraryTenantId, SkillVisibility,
+};
 use labby_runtime::error::ToolError;
 use labby_runtime::skills::parse_skill_uri;
 use labby_runtime::skills::wire::{
@@ -115,19 +117,28 @@ pub(crate) struct SkillRegistryContext {
 pub(crate) struct ArtifactAccessSnapshot {
     tenant_id: LibraryTenantId,
     actor_id: LibraryActorId,
+    project_id: LibraryActorId,
+    team_ids: BTreeSet<LibraryActorId>,
     is_admin: bool,
+    is_platform_admin: bool,
 }
 
 impl ArtifactAccessSnapshot {
     pub(crate) fn new(
         tenant_id: LibraryTenantId,
         actor_id: LibraryActorId,
+        project_id: LibraryActorId,
+        team_ids: BTreeSet<LibraryActorId>,
         is_admin: bool,
+        is_platform_admin: bool,
     ) -> Self {
         Self {
             tenant_id,
             actor_id,
+            project_id,
+            team_ids,
             is_admin,
+            is_platform_admin,
         }
     }
 
@@ -137,9 +148,23 @@ impl ArtifactAccessSnapshot {
         visibility: SkillVisibility,
     ) -> bool {
         ownership.tenant_id == self.tenant_id
-            && (ownership.owner_id == self.actor_id
-                || self.is_admin
-                || visibility == SkillVisibility::Tenant)
+            && match ownership.owner_kind() {
+                LibraryOwnerKind::Personal => {
+                    ownership.owner_id == self.actor_id
+                        || self.is_platform_admin
+                        || visibility == SkillVisibility::Tenant
+                }
+                LibraryOwnerKind::Project => {
+                    (ownership.owner_id == self.project_id || self.is_platform_admin)
+                        && (visibility == SkillVisibility::Tenant || self.is_admin)
+                }
+                LibraryOwnerKind::Team => {
+                    self.is_platform_admin
+                        || (self.team_ids.len() == 1
+                            && self.team_ids.contains(&ownership.owner_id)
+                            && visibility == SkillVisibility::Tenant)
+                }
+            }
     }
 }
 
@@ -894,12 +919,24 @@ mod tests {
         }))
     }
 
-    fn artifact_access(tenant: &str, actor: &str, is_admin: bool) -> ArtifactAccessSnapshot {
+    fn artifact_access_with_platform_role(
+        tenant: &str,
+        actor: &str,
+        is_admin: bool,
+        is_platform_admin: bool,
+    ) -> ArtifactAccessSnapshot {
         ArtifactAccessSnapshot::new(
             LibraryTenantId::from_canonical_projection(tenant).unwrap(),
             LibraryActorId::from_canonical_projection(actor).unwrap(),
+            LibraryActorId::from_canonical_projection("project").unwrap(),
+            BTreeSet::new(),
             is_admin,
+            is_platform_admin,
         )
+    }
+
+    fn artifact_access(tenant: &str, actor: &str, is_admin: bool) -> ArtifactAccessSnapshot {
+        artifact_access_with_platform_role(tenant, actor, is_admin, false)
     }
 
     use labby_runtime::skills::ResourceDigest;
@@ -1009,6 +1046,17 @@ mod tests {
             .with_artifact_access(artifact_access("tenant-a", "admin", true));
         assert!(
             resolve_visible_skill(&admin, "skill://labby/artifact/notes.md")
+                .await
+                .unwrap()
+                .is_none(),
+            "project administration does not grant access to another principal's private records"
+        );
+
+        let platform_admin = artifact_context(SkillVisibility::Private).with_artifact_access(
+            artifact_access_with_platform_role("tenant-a", "platform-admin", true, true),
+        );
+        assert!(
+            resolve_visible_skill(&platform_admin, "skill://labby/artifact/notes.md")
                 .await
                 .unwrap()
                 .is_some()

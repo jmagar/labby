@@ -188,6 +188,14 @@ impl SkillLibraryAuditEvent {
         self
     }
 
+    /// Rebind the terminal/audit target after a create receives its owner-qualified physical id.
+    pub(crate) fn with_target(mut self, target: &CanonicalArtifactId) -> Self {
+        let digest = target.audit_digest();
+        self.target_digest = digest.clone();
+        self.key.target_digest = digest;
+        self
+    }
+
     fn refresh_key(&mut self) {
         self.key.tenant_id.clone_from(&self.tenant_id);
         self.key.actor_id.clone_from(&self.actor_id);

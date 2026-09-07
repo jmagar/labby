@@ -514,6 +514,38 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
     let mut reg = ToolRegistry::new();
 
     reg.register(RegisteredService::bootstrap_operator(
+        "access",
+        "Manage teams, memberships, invitations, and project assignments",
+        "administration",
+        crate::dispatch::access::ACTIONS,
+        dispatch_fn!(crate::dispatch::access::dispatch_unbound),
+    ));
+
+    reg.register_caller_bound(RegisteredService::bootstrap_operator(
+        "agents",
+        "Create, manage, and run owner-scoped Agents",
+        "automation",
+        crate::dispatch::agents::ACTIONS,
+        dispatch_fn!(crate::dispatch::agents::dispatch_unbound),
+    ));
+
+    reg.register_caller_bound(RegisteredService::bootstrap_operator(
+        "tasks",
+        "Create and operate owner-scoped Agent Tasks",
+        "automation",
+        crate::dispatch::tasks::ACTIONS,
+        dispatch_fn!(crate::dispatch::tasks::dispatch_unbound),
+    ));
+
+    reg.register(RegisteredService::bootstrap_operator(
+        "dev_containers",
+        "Create and manage isolated development containers",
+        "administration",
+        crate::dispatch::dev_containers::ACTIONS,
+        dispatch_fn!(crate::dispatch::dev_containers::dispatch_unbound),
+    ));
+
+    reg.register(RegisteredService::bootstrap_operator(
         "browser",
         "Bridge browser-native WebMCP tools into Labby",
         "bootstrap",
@@ -560,7 +592,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
     }
 
     #[cfg(feature = "skills")]
-    reg.register(RegisteredService::bootstrap_operator(
+    reg.register_caller_bound(RegisteredService::bootstrap_operator(
         crate::dispatch::artifacts::META.name,
         crate::dispatch::artifacts::META.description,
         "bootstrap",
@@ -669,6 +701,19 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
         crate::mcp::services::fs::ACTIONS,
         dispatch_fn!(crate::mcp::services::fs::dispatch),
     ));
+
+    // Static documentation describes every compiled product surface and must
+    // not drift with the host that generated it. The live registry remains
+    // fail-closed on platforms without descriptor-relative filesystem support.
+    if !apply_runtime_conditions || cfg!(any(target_os = "linux", target_os = "android")) {
+        reg.register_caller_bound(RegisteredService::bootstrap_operator(
+            crate::dispatch::file_stash::META.0,
+            crate::dispatch::file_stash::META.1,
+            crate::dispatch::file_stash::META.2,
+            crate::dispatch::file_stash::ACTIONS,
+            dispatch_fn!(crate::dispatch::file_stash::dispatch),
+        ));
+    }
 
     // Static documentation describes every compiled product surface and must
     // not drift with the host that generated it. The live registry remains
@@ -902,6 +947,28 @@ mod tests {
             .any(|service| service.name == name)
     }
 
+    #[cfg(feature = "skills")]
+    #[test]
+    fn artifacts_require_caller_bound_dispatch_for_local_and_remote_actions() {
+        let registry = build_default_registry();
+        assert_eq!(
+            registry.dispatch_capability("artifacts"),
+            Some(super::DispatchCapability::CallerBound)
+        );
+        assert!(!registry.supports_context_free_dispatch("artifacts"));
+        assert!(registry.supports_mcp_dispatch("artifacts"));
+        #[cfg(feature = "gateway")]
+        {
+            use labby_gateway::registry::InProcessServiceRegistry as _;
+            assert!(
+                registry
+                    .in_process_services()
+                    .iter()
+                    .all(|service| service.service_name() != "artifacts")
+            );
+        }
+    }
+
     #[cfg(not(feature = "gateway"))]
     #[test]
     fn default_registry_omits_gateway_without_feature() {
@@ -943,6 +1010,8 @@ mod tests {
     fn registry_and_router_service_sets_are_identical() {
         let http_router_services: std::collections::HashSet<&'static str> = {
             let mut s = std::collections::HashSet::new();
+            s.insert("access");
+            s.extend(["agents", "tasks", "dev_containers"]);
             s.insert("browser");
             #[cfg(feature = "gateway")]
             s.insert("gateway");
@@ -955,6 +1024,8 @@ mod tests {
             s.insert(crate::dispatch::setup::META.name); // always-on
             #[cfg(feature = "fs")]
             s.insert("fs");
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            s.insert("stash");
             #[cfg(target_os = "linux")]
             s.insert("stash");
             s

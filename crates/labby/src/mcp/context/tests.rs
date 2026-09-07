@@ -7,13 +7,49 @@ use super::{
     subject_from_extensions, tool_execute_builtin_action_allowed, tool_execute_scope_allowed,
 };
 #[cfg(feature = "gateway")]
-use super::{oauth_upstream_subject_for_request, upstream_uses_capability_relay};
+use super::{
+    oauth_upstream_subject_for_request, team_credential_binding_matches,
+    upstream_uses_capability_relay,
+};
 use crate::dispatch::error::ToolError;
 use crate::registry::RegisteredService;
 use labby_runtime::caller_auth::PropagatedCallerAuth;
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
+
+#[cfg(feature = "gateway")]
+#[test]
+fn team_credential_checkout_rejects_stale_and_revoked_bindings() {
+    use labby_runtime::gateway_authority::{TeamCredentialBinding, TeamCredentialStatus};
+
+    let mut binding = TeamCredentialBinding {
+        binding_id: "binding-v2".into(),
+        team_id: "alpha".into(),
+        upstream_name: "shared".into(),
+        custodian_principal_id: "owner".into(),
+        generation: 2,
+        rotated_at_millis: 2,
+        status: TeamCredentialStatus::Active,
+    };
+    assert!(team_credential_binding_matches(
+        Some(&binding),
+        "binding-v2",
+        2
+    ));
+    assert!(!team_credential_binding_matches(
+        Some(&binding),
+        "binding-v1",
+        1
+    ));
+    binding.status = TeamCredentialStatus::Revoked;
+    assert!(!team_credential_binding_matches(
+        Some(&binding),
+        "binding-v2",
+        2
+    ));
+    assert!(!team_credential_binding_matches(None, "binding-v2", 2));
+}
 
 #[test]
 fn caller_authorization_read_gate_handles_every_transport_shape() {

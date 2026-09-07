@@ -101,7 +101,7 @@ pub(super) fn bootstrap_owner(
 }
 
 fn any_business_state(connection: &Connection) -> AccessStoreResult<bool> {
-    connection.query_row("SELECT EXISTS(SELECT 1 FROM organizations) OR EXISTS(SELECT 1 FROM principals) OR EXISTS(SELECT 1 FROM principal_links) OR EXISTS(SELECT 1 FROM projects) OR EXISTS(SELECT 1 FROM project_memberships) OR EXISTS(SELECT 1 FROM project_loadouts) OR EXISTS(SELECT 1 FROM access_audit)", [], |r| r.get(0)).map_err(super::store::map_sqlite_error)
+    connection.query_row("SELECT EXISTS(SELECT 1 FROM organizations) OR EXISTS(SELECT 1 FROM principals) OR EXISTS(SELECT 1 FROM principal_links) OR EXISTS(SELECT 1 FROM projects) OR EXISTS(SELECT 1 FROM project_memberships) OR EXISTS(SELECT 1 FROM project_loadouts) OR EXISTS(SELECT 1 FROM platform_administrators) OR EXISTS(SELECT 1 FROM groups) OR EXISTS(SELECT 1 FROM team_memberships) OR EXISTS(SELECT 1 FROM access_audit)", [], |r| r.get(0)).map_err(super::store::map_sqlite_error)
 }
 
 fn existing_state_matches(
@@ -112,7 +112,7 @@ fn existing_state_matches(
         PrincipalLink::External { issuer, subject } => connection.query_row("SELECT count(*)=1 FROM principal_links WHERE link_id='bootstrap-owner-link' AND principal_id=?1 AND link_kind='external' AND issuer=?2 AND subject=?3 AND credential_id IS NULL AND status='active'", params![PRINCIPAL_ID,issuer,subject], |r| r.get(0)),
         PrincipalLink::LocalCredential { credential_id } => connection.query_row("SELECT count(*)=1 FROM principal_links WHERE link_id='bootstrap-owner-link' AND principal_id=?1 AND link_kind='local_credential' AND credential_id=?2 AND issuer IS NULL AND subject IS NULL AND status='active'", params![PRINCIPAL_ID,credential_id], |r| r.get(0)),
     }.map_err(super::store::map_sqlite_error)?;
-    let shape: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM organizations WHERE organization_id=?1 AND name=?2 AND status='active') AND EXISTS(SELECT 1 FROM principals WHERE principal_id=?3 AND organization_id=?1 AND kind='user' AND status='active') AND EXISTS(SELECT 1 FROM projects WHERE project_id=?4 AND organization_id=?1 AND name=?5 AND status='active') AND EXISTS(SELECT 1 FROM project_memberships WHERE membership_id='bootstrap-owner-membership' AND organization_id=?1 AND project_id=?4 AND principal_id=?3 AND role='owner' AND status='active') AND EXISTS(SELECT 1 FROM access_audit WHERE event_id='bootstrap-owner-audit' AND actor_principal_id=?3 AND organization_id=?1 AND project_id=?4 AND action='access.bootstrap_owner' AND decision='allow' AND reason_code='explicit_owner_bootstrap')", params![ORGANIZATION_ID,input.organization_name,PRINCIPAL_ID,PROJECT_ID,input.project_name], |r| r.get(0)).map_err(super::store::map_sqlite_error)?;
+    let shape: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM organizations WHERE organization_id=?1 AND name=?2 AND status='active') AND EXISTS(SELECT 1 FROM principals WHERE principal_id=?3 AND organization_id=?1 AND kind='user' AND status='active') AND EXISTS(SELECT 1 FROM projects WHERE project_id=?4 AND organization_id=?1 AND name=?5 AND status='active') AND EXISTS(SELECT 1 FROM project_memberships WHERE membership_id='bootstrap-owner-membership' AND organization_id=?1 AND project_id=?4 AND principal_id=?3 AND role='owner' AND status='active') AND EXISTS(SELECT 1 FROM platform_administrators WHERE principal_id=?3 AND status='active' AND authority_epoch=1 AND granted_by=?3) AND EXISTS(SELECT 1 FROM groups WHERE group_id='bootstrap-initial-team' AND organization_id=?1 AND kind='team' AND status='active') AND EXISTS(SELECT 1 FROM team_memberships WHERE membership_id='bootstrap-initial-team-owner' AND organization_id=?1 AND team_id='bootstrap-initial-team' AND principal_id=?3 AND role='owner' AND status='active') AND EXISTS(SELECT 1 FROM access_audit WHERE event_id='bootstrap-owner-audit' AND actor_principal_id=?3 AND organization_id=?1 AND project_id=?4 AND action='access.bootstrap_owner' AND decision='allow' AND reason_code='explicit_owner_bootstrap') AND EXISTS(SELECT 1 FROM access_audit WHERE event_id='bootstrap-platform-admin-audit' AND actor_principal_id=?3 AND organization_id=?1 AND action='access.platform_admin.bootstrap') AND EXISTS(SELECT 1 FROM access_audit WHERE event_id='bootstrap-initial-team-audit' AND actor_principal_id=?3 AND organization_id=?1 AND action='access.team.bootstrap')", params![ORGANIZATION_ID,input.organization_name,PRINCIPAL_ID,PROJECT_ID,input.project_name], |r| r.get(0)).map_err(super::store::map_sqlite_error)?;
     Ok(identity_matches && shape)
 }
 
@@ -189,7 +189,7 @@ mod tests {
         let reopened = AccessStore::open(path).await.unwrap();
         assert_eq!(
             reopened.bootstrap_counts_for_test().await.unwrap(),
-            (1, 1, 1, 1, 1, 1)
+            (1, 1, 1, 1, 1, 3)
         );
         assert_eq!(reopened.bootstrap_metadata_for_test().await.unwrap().0, 1);
     }
@@ -238,7 +238,7 @@ mod tests {
         ));
         assert_eq!(
             store.bootstrap_counts_for_test().await.unwrap(),
-            (1, 1, 1, 1, 1, 1)
+            (1, 1, 1, 1, 1, 3)
         );
     }
 
@@ -413,7 +413,12 @@ mod tests {
             .unwrap();
         drop(store);
         let connection = Connection::open(&path).unwrap();
-        connection.execute("DELETE FROM access_audit", []).unwrap();
+        connection
+            .execute_batch(
+                "DELETE FROM authority_projection_outbox;
+                 DELETE FROM access_audit;",
+            )
+            .unwrap();
         drop(connection);
         assert!(matches!(
             AccessStore::open(path).await,

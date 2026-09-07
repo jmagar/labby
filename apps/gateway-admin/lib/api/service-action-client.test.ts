@@ -19,6 +19,21 @@ class TestActionError extends Error implements ServiceActionError {
   }
 }
 
+test('performServiceAction rejects a response from a superseded authority context', async () => {
+  const originalFetch = globalThis.fetch
+  const authority = { schemaVersion: 1, compatibilityGeneration: 1, principalId: 'one', organizationId: 'org', activeOwner: { kind: 'personal' as const, id: 'one' }, teams: [], projects: [], capabilities: ['scope.read'], generation: 1 } as const
+  __setBrowserSessionStateForTests({ status: 'authenticated', user: { sub: 'one' }, expiresAt: 1, csrfToken: 'one', authority })
+  let release: (() => void) | undefined
+  const blocked = new Promise<void>((resolve) => { release = resolve })
+  globalThis.fetch = (async () => { await blocked; return new Response(JSON.stringify({ ok: true }), { status: 200 }) }) as typeof fetch
+  try {
+    const pending = performServiceAction({ action: 'artifacts.list', params: {}, serviceLabel: 'Library', url: '/v1/artifacts', createError: (message, status, code) => new TestActionError(message, status, code) })
+    __setBrowserSessionStateForTests({ status: 'authenticated', user: { sub: 'two' }, expiresAt: 2, csrfToken: 'two', authority: { ...authority, principalId: 'two', activeOwner: { kind: 'personal', id: 'two' }, generation: 2 } })
+    release?.()
+    await assert.rejects(pending, (error: unknown) => error instanceof DOMException && error.name === 'AbortError')
+  } finally { globalThis.fetch = originalFetch }
+})
+
 test('safeFanout returns per-item failures without rejecting the whole fan-out', async () => {
   const results = await safeFanout([1, 2, 3], async (item) => {
     if (item === 2) {

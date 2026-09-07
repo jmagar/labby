@@ -1075,6 +1075,10 @@ pub struct GatewayLoadoutConfig {
     /// [`GatewayLoadoutConfig::upstreams`].
     #[serde(default)]
     pub services: Vec<String>,
+    /// Redacted references to host-custodied credentials. A loadout may select
+    /// a binding generation, but never contains or returns secret material.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub credential_bindings: Vec<GatewayCredentialBindingRef>,
     #[serde(default)]
     pub expose_code_mode: bool,
     #[serde(default = "default_true")]
@@ -1094,6 +1098,7 @@ impl Default for GatewayLoadoutConfig {
             description: None,
             upstreams: Vec::new(),
             services: Vec::new(),
+            credential_bindings: Vec::new(),
             expose_code_mode: false,
             expose_tools: true,
             expose_resources: true,
@@ -1137,6 +1142,12 @@ impl GatewayLoadoutConfig {
                 .filter(|name| services.contains(name.as_str()))
                 .cloned()
                 .collect(),
+            credential_bindings: self
+                .credential_bindings
+                .iter()
+                .filter(|binding| upstreams.contains(binding.upstream_name.as_str()))
+                .cloned()
+                .collect(),
             expose_code_mode: self.expose_code_mode && target.expose_code_mode,
             expose_tools: self.expose_tools,
             expose_resources: self.expose_resources,
@@ -1144,6 +1155,17 @@ impl GatewayLoadoutConfig {
             expose_skills: self.expose_skills,
         })
     }
+}
+
+/// Secret-free reference from a Team-owned loadout to an installation-owned
+/// credential. Rotation creates a new generation, which changes runtime cache
+/// identity and makes retained work carrying the old generation fail closed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GatewayCredentialBindingRef {
+    pub upstream_name: String,
+    pub binding_id: String,
+    pub generation: u64,
 }
 
 /// Explicit target kind for an OAuth-protected public MCP route.

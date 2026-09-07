@@ -14,8 +14,11 @@
 //! `labby-auth` and `labby-codemode`, which never touch them.
 
 pub mod agent_error;
+pub mod agent_runtime;
 /// Surface-neutral Artifact domain and local runtime implementation.
 pub mod artifacts;
+/// Typed, versioned authority epochs and short-lived execution leases.
+pub mod authority;
 /// Shared retry backoff and deterministic jitter helpers.
 pub mod backoff;
 pub mod caller_auth;
@@ -23,7 +26,12 @@ pub mod catalog_notify;
 pub mod client_registry;
 /// Shared runtime state for the optional Code Mode MCP App surface.
 pub mod code_mode_app;
+/// Dev Container admission and lifecycle validation without host execution.
+pub mod dev_container;
+/// Pluggable Dev Container execution and restart recovery.
+pub mod dev_container_runtime;
 pub mod error;
+pub mod gateway_authority;
 pub mod gateway_config;
 pub mod helpers;
 pub mod path_safety;
@@ -33,6 +41,7 @@ pub mod redact;
 pub mod response_body;
 pub mod secure_atomic_file;
 pub mod skills;
+pub mod task_runtime;
 
 pub use helpers::{env_non_empty, home_dir, lab_home};
 

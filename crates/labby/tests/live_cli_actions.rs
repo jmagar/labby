@@ -955,7 +955,13 @@ async fn stateful_cli_workflows_observe_mutations_and_always_roll_them_back() {
         // Gateway: create -> read -> update -> delete uses only deliberately
         // unreachable loopback endpoints, so no external service or credential
         // can be contacted while durable configuration is exercised.
-        let gateway_add = action_scenarios::run_cli(
+        let gateway_daemon = live_labby::LiveLabbyBuilder::new()
+            .env("LABBY_E2E_BOOTSTRAP_STATIC_OWNER", "1")
+            .env("LABBY_E2E_TEAM_ID", "bootstrap-initial-team")
+            .start()
+            .await
+            .expect("stateful gateway daemon");
+        let gateway_add = action_scenarios::run_cli_against(
             home,
             &[
                 "gateway",
@@ -966,28 +972,36 @@ async fn stateful_cli_workflows_observe_mutations_and_always_roll_them_back() {
                 "http://127.0.0.1:9/mcp",
                 "--json",
             ],
+            &gateway_daemon,
         )
         .await
         .unwrap();
         action_scenarios::assert_success_json(&gateway_add, "gateway.add");
-        let gateway_get =
-            action_scenarios::run_cli(home, &["gateway", "get", "matrix-owned", "--json"])
-                .await
-                .unwrap();
+        let gateway_get = action_scenarios::run_cli_against(
+            home,
+            &["gateway", "get", "matrix-owned", "--json"],
+            &gateway_daemon,
+        )
+        .await
+        .unwrap();
         action_scenarios::assert_success_json(&gateway_get, "gateway.get");
         assert!(String::from_utf8_lossy(&gateway_get.stdout).contains("127.0.0.1:9"));
         record_observed_transition("gateway:gateway.add");
         record_observed_success("gateway:gateway.get");
-        let reload = action_scenarios::run_cli(home, &["gateway", "reload", "--json"])
-            .await
-            .unwrap();
+        let reload = action_scenarios::run_cli_against(
+            home,
+            &["gateway", "reload", "--json"],
+            &gateway_daemon,
+        )
+        .await
+        .unwrap();
         let reload = action_scenarios::assert_success_json(&reload, "gateway.reload");
         assert_eq!(
             reload["completed"], true,
             "gateway reload did not complete its runtime reconciliation"
         );
         record_observed_transition("gateway:gateway.reload");
-        let gateway_update = action_scenarios::run_cli(
+        let gateway_update = action_scenarios::run_cli_against(
             home,
             &[
                 "gateway",
@@ -997,29 +1011,39 @@ async fn stateful_cli_workflows_observe_mutations_and_always_roll_them_back() {
                 "http://127.0.0.1:10/mcp",
                 "--json",
             ],
+            &gateway_daemon,
         )
         .await
         .unwrap();
         action_scenarios::assert_success_json(&gateway_update, "gateway.update");
-        let gateway_updated =
-            action_scenarios::run_cli(home, &["gateway", "get", "matrix-owned", "--json"])
-                .await
-                .unwrap();
+        let gateway_updated = action_scenarios::run_cli_against(
+            home,
+            &["gateway", "get", "matrix-owned", "--json"],
+            &gateway_daemon,
+        )
+        .await
+        .unwrap();
         action_scenarios::assert_success_json(&gateway_updated, "gateway.get.updated");
         assert!(
             String::from_utf8_lossy(&gateway_updated.stdout).contains("127.0.0.1:10"),
             "gateway update was not observable"
         );
         record_observed_transition("gateway:gateway.update");
-        let gateway_remove =
-            action_scenarios::run_cli(home, &["gateway", "remove", "matrix-owned", "--json"])
-                .await
-                .unwrap();
+        let gateway_remove = action_scenarios::run_cli_against(
+            home,
+            &["gateway", "remove", "matrix-owned", "--json"],
+            &gateway_daemon,
+        )
+        .await
+        .unwrap();
         action_scenarios::assert_success_json(&gateway_remove, "gateway.remove");
-        let gateway_absent =
-            action_scenarios::run_cli(home, &["gateway", "get", "matrix-owned", "--json"])
-                .await
-                .unwrap();
+        let gateway_absent = action_scenarios::run_cli_against(
+            home,
+            &["gateway", "get", "matrix-owned", "--json"],
+            &gateway_daemon,
+        )
+        .await
+        .unwrap();
         assert!(
             !gateway_absent.status.success(),
             "removed gateway remained observable"
@@ -1030,22 +1054,38 @@ async fn stateful_cli_workflows_observe_mutations_and_always_roll_them_back() {
 
         // Code Mode: observe both sides of the setting transition and restore
         // the isolated home to its initial disabled posture.
-        let enable = action_scenarios::run_cli(home, &["gateway", "code", "enable", "--json"])
-            .await
-            .unwrap();
+        let enable = action_scenarios::run_cli_against(
+            home,
+            &["gateway", "code", "enable", "--json"],
+            &gateway_daemon,
+        )
+        .await
+        .unwrap();
         action_scenarios::assert_success_json(&enable, "gateway.code_mode.enable");
-        let enabled = action_scenarios::run_cli(home, &["gateway", "code", "status", "--json"])
-            .await
-            .unwrap();
+        let enabled = action_scenarios::run_cli_against(
+            home,
+            &["gateway", "code", "status", "--json"],
+            &gateway_daemon,
+        )
+        .await
+        .unwrap();
         let enabled = action_scenarios::assert_success_json(&enabled, "gateway.code_mode.enabled");
         assert_eq!(enabled["enabled"], true, "Code Mode did not enable");
-        let disable = action_scenarios::run_cli(home, &["gateway", "code", "disable", "--json"])
-            .await
-            .unwrap();
+        let disable = action_scenarios::run_cli_against(
+            home,
+            &["gateway", "code", "disable", "--json"],
+            &gateway_daemon,
+        )
+        .await
+        .unwrap();
         action_scenarios::assert_success_json(&disable, "gateway.code_mode.disable");
-        let disabled = action_scenarios::run_cli(home, &["gateway", "code", "status", "--json"])
-            .await
-            .unwrap();
+        let disabled = action_scenarios::run_cli_against(
+            home,
+            &["gateway", "code", "status", "--json"],
+            &gateway_daemon,
+        )
+        .await
+        .unwrap();
         let disabled =
             action_scenarios::assert_success_json(&disabled, "gateway.code_mode.disabled");
         assert_eq!(disabled["enabled"], false, "Code Mode cleanup failed");
@@ -1053,15 +1093,25 @@ async fn stateful_cli_workflows_observe_mutations_and_always_roll_them_back() {
 
         // Missing transport parameters prove the stable invalid-input contract
         // after cleanup and cannot silently fall back to ambient configuration.
-        let invalid = action_scenarios::run_cli(home, &["gateway", "test", "--json"])
-            .await
-            .unwrap();
+        let invalid = action_scenarios::run_cli_against(
+            home,
+            &["gateway", "test", "--json"],
+            &gateway_daemon,
+        )
+        .await
+        .unwrap();
         assert!(
             !invalid.status.success(),
             "invalid gateway proposal unexpectedly succeeded"
         );
         action_scenarios::assert_sanitized(&invalid.stdout, "gateway.invalid");
         action_scenarios::assert_sanitized(&invalid.stderr, "gateway.invalid");
+        let cleanup = gateway_daemon.finish().await;
+        assert!(
+            cleanup.is_clean(),
+            "stateful gateway cleanup: {:?}",
+            cleanup.failures
+        );
     })
     .await
     .expect("stateful workflows absolute deadline");

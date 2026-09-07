@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -11,6 +12,54 @@ use super::error::AccessStoreError;
 use super::health::{AccessHealthStatus, inspect_health};
 use super::store::AccessStore;
 use super::{CredentialSnapshot, IssueCredentialInput, MutationOutcome};
+
+/// A Stash owner resolution that retains the exact domain authority needed to
+/// revalidate at the dispatch and commit/open-handle boundaries.
+pub(crate) struct FileStashOwnerAuthorization {
+    principal: super::AccessPrincipalId,
+    store: AccessStore,
+    identity: labby_auth::VerifiedIdentity,
+    owner: labby_primitives::access::OwnerScope,
+    capability: labby_primitives::access::Capability,
+    lease: labby_runtime::authority::AuthorityLease,
+}
+
+impl std::ops::Deref for FileStashOwnerAuthorization {
+    type Target = super::AccessPrincipalId;
+
+    fn deref(&self) -> &Self::Target {
+        &self.principal
+    }
+}
+
+impl FileStashOwnerAuthorization {
+    pub(crate) async fn validate_before_commit(
+        &self,
+    ) -> Result<(), FileStashPrincipalResolutionError> {
+        let epochs = super::refresh_authority_epochs(
+            &self.store,
+            self.identity.clone(),
+            self.owner.clone(),
+            self.capability,
+        )
+        .await
+        .map_err(|_| FileStashPrincipalResolutionError::IdentityUnavailable)?;
+        let now = u64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| FileStashPrincipalResolutionError::StoreUnavailable)?
+                .as_millis(),
+        )
+        .map_err(|_| FileStashPrincipalResolutionError::StoreUnavailable)?;
+        self.lease
+            .validate_at(
+                labby_runtime::authority::AuthoritySafeBoundary::BeforeCommit,
+                now,
+                &epochs,
+            )
+            .map_err(|_| FileStashPrincipalResolutionError::IdentityUnavailable)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AccessSetupReason {
@@ -79,6 +128,50 @@ enum RuntimeState {
     Blocked(AccessBlockedReason),
 }
 
+struct DeterministicDevContainerRuntime;
+
+impl labby_runtime::dev_container_runtime::ContainerRuntime for DeterministicDevContainerRuntime {
+    type Error = labby_runtime::dev_container_runtime::DisabledRuntimeError;
+
+    fn create<'a>(
+        &'a self,
+        _: labby_runtime::dev_container_runtime::EngineCreateRequest,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn inspect<'a>(
+        &'a self,
+        _: &'a labby_runtime::dev_container_runtime::EngineHandle,
+    ) -> std::pin::Pin<
+        Box<
+            dyn Future<
+                    Output = Result<labby_runtime::dev_container_runtime::EngineState, Self::Error>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async { Ok(labby_runtime::dev_container_runtime::EngineState::Running) })
+    }
+    fn start<'a>(
+        &'a self,
+        _: &'a labby_runtime::dev_container_runtime::EngineHandle,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn stop<'a>(
+        &'a self,
+        _: &'a labby_runtime::dev_container_runtime::EngineHandle,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+    fn destroy<'a>(
+        &'a self,
+        _: &'a labby_runtime::dev_container_runtime::EngineHandle,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), Self::Error>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
 /// Process-scoped owner of the access-store lifecycle.
 ///
 /// Construction is observational: it never creates or migrates the store. Only the explicit
@@ -88,6 +181,11 @@ pub(crate) struct AccessRuntime {
     path: Arc<PathBuf>,
     state: Arc<Mutex<RuntimeState>>,
     bootstrap_writer: Arc<Semaphore>,
+    dev_container_runtime: Arc<
+        dyn labby_runtime::dev_container_runtime::ContainerRuntime<
+                Error = labby_runtime::dev_container_runtime::DisabledRuntimeError,
+            >,
+    >,
 }
 
 impl AccessRuntime {
@@ -100,6 +198,17 @@ impl AccessRuntime {
             RuntimeState::SetupRequired(reason) => Err(AccessRuntimeError::SetupRequired(*reason)),
             RuntimeState::Blocked(reason) => Err(AccessRuntimeError::Blocked(*reason)),
         }
+    }
+
+    pub(crate) async fn session_authority(
+        &self,
+        identity: labby_auth::VerifiedIdentity,
+    ) -> Result<super::read::SessionAuthoritySnapshot, AccessRuntimeError> {
+        self.security_store()
+            .await?
+            .session_authority(identity)
+            .await
+            .map_err(|_| AccessRuntimeError::LifecycleUnavailable)
     }
 
     pub(crate) async fn admit_security_operation(
@@ -159,6 +268,9 @@ impl AccessRuntime {
                 AccessBlockedReason::Unavailable,
             ))),
             bootstrap_writer: Arc::new(Semaphore::new(1)),
+            dev_container_runtime: Arc::new(
+                labby_runtime::dev_container_runtime::DisabledContainerRuntime,
+            ),
         }
     }
 
@@ -175,11 +287,49 @@ impl AccessRuntime {
             tracing::warn!(?reason, "access runtime initialization blocked");
             state = RuntimeState::Blocked(reason);
         }
+        let dev_container_runtime: Arc<
+            dyn labby_runtime::dev_container_runtime::ContainerRuntime<
+                    Error = labby_runtime::dev_container_runtime::DisabledRuntimeError,
+                >,
+        > = if cfg!(debug_assertions)
+            && std::env::var_os("LABBY_E2E_DETERMINISTIC_EXECUTORS").is_some()
+        {
+            Arc::new(DeterministicDevContainerRuntime)
+        } else {
+            Arc::new(labby_runtime::dev_container_runtime::DisabledContainerRuntime)
+        };
         Self {
             path: Arc::new(path),
             state: Arc::new(Mutex::new(state)),
             bootstrap_writer: Arc::new(Semaphore::new(1)),
+            dev_container_runtime,
         }
+    }
+
+    pub(crate) fn with_dev_container_runtime(
+        mut self,
+        runtime: Arc<
+            dyn labby_runtime::dev_container_runtime::ContainerRuntime<
+                    Error = labby_runtime::dev_container_runtime::DisabledRuntimeError,
+                >,
+        >,
+    ) -> Self {
+        self.dev_container_runtime = runtime;
+        self
+    }
+
+    pub(crate) fn dev_container_runtime(
+        &self,
+    ) -> Arc<
+        dyn labby_runtime::dev_container_runtime::ContainerRuntime<
+                Error = labby_runtime::dev_container_runtime::DisabledRuntimeError,
+            >,
+    > {
+        if cfg!(debug_assertions) && std::env::var_os("LABBY_E2E_DETERMINISTIC_EXECUTORS").is_some()
+        {
+            return Arc::new(DeterministicDevContainerRuntime);
+        }
+        Arc::clone(&self.dev_container_runtime)
     }
 
     pub(crate) async fn status(&self) -> AccessRuntimeStatus {
@@ -207,6 +357,113 @@ impl AccessRuntime {
             )),
             RuntimeState::Blocked(reason) => Err(AccessRuntimeError::Blocked(*reason)),
         }
+    }
+
+    /// Resolve a typed Stash owner only after current domain authorization.
+    /// Personal remains the default and retains the historical principal key;
+    /// Team storage keys are explicitly namespaced and cannot collide.
+    pub(crate) async fn authorize_file_stash_owner(
+        &self,
+        identity: labby_auth::VerifiedIdentity,
+        ceiling: super::AuthorityCeiling,
+        owner: labby_primitives::access::OwnerScope,
+        action: &str,
+        capability: labby_primitives::access::Capability,
+        now_millis: u64,
+    ) -> Result<FileStashOwnerAuthorization, FileStashPrincipalResolutionError> {
+        use labby_primitives::access::{ActionRef, ResourceFamily, ResourceId, ResourceRef};
+        let store = self.store().await?;
+        let personal_principal =
+            if let labby_primitives::access::OwnerScope::Personal(expected) = &owner {
+                let principal = store
+                    .resolve_file_stash_principal(identity.clone())
+                    .await
+                    .map_err(|_| FileStashPrincipalResolutionError::IdentityUnavailable)?;
+                (principal.as_str() == expected.as_str())
+                    .then_some(principal)
+                    .ok_or(FileStashPrincipalResolutionError::IdentityUnavailable)
+                    .map(Some)?
+            } else {
+                None
+            };
+        let action_ref = ActionRef::new("stash", action)
+            .map_err(|_| FileStashPrincipalResolutionError::IdentityUnavailable)?;
+        let lease = super::authorize_action(
+            &store,
+            super::AuthorityRequest::new(
+                identity.clone(),
+                super::ActionAuthoritySpec::SCHEMA_VERSION,
+                action_ref.clone(),
+                ResourceRef::new(
+                    owner.clone(),
+                    ResourceFamily::Stash,
+                    ResourceId::new(owner.id())
+                        .map_err(|_| FileStashPrincipalResolutionError::IdentityUnavailable)?,
+                ),
+                ceiling,
+                None,
+                now_millis,
+                vec![
+                    labby_runtime::authority::AuthoritySafeBoundary::BeforeDispatch,
+                    labby_runtime::authority::AuthoritySafeBoundary::BeforeCommit,
+                ],
+                vec![super::ActionAuthoritySpec::new(
+                    action_ref,
+                    ResourceFamily::Stash,
+                    capability,
+                )],
+            ),
+        )
+        .await
+        .map_err(|_| FileStashPrincipalResolutionError::IdentityUnavailable)?;
+        let principal = if let Some(principal) = personal_principal {
+            principal
+        } else {
+            let key = match &owner {
+                labby_primitives::access::OwnerScope::Team(id) => format!("team:{}", id.as_str()),
+                labby_primitives::access::OwnerScope::Project(id) => {
+                    format!("project:{}", id.as_str())
+                }
+                labby_primitives::access::OwnerScope::Installation(id) => {
+                    format!("installation:{}", id.as_str())
+                }
+                labby_primitives::access::OwnerScope::Personal(_) => unreachable!(),
+            };
+            super::AccessPrincipalId(key)
+        };
+        let epochs =
+            super::refresh_authority_epochs(&store, identity.clone(), owner.clone(), capability)
+                .await
+                .map_err(|_| FileStashPrincipalResolutionError::IdentityUnavailable)?;
+        lease
+            .validate_at(
+                labby_runtime::authority::AuthoritySafeBoundary::BeforeDispatch,
+                now_millis,
+                &epochs,
+            )
+            .map_err(|_| FileStashPrincipalResolutionError::IdentityUnavailable)?;
+        Ok(FileStashOwnerAuthorization {
+            principal,
+            store,
+            identity,
+            owner,
+            capability,
+            lease,
+        })
+    }
+
+    pub(crate) async fn resolve_file_stash_owner(
+        &self,
+        identity: labby_auth::VerifiedIdentity,
+        ceiling: super::AuthorityCeiling,
+        owner: labby_primitives::access::OwnerScope,
+        action: &str,
+        capability: labby_primitives::access::Capability,
+        now_millis: u64,
+    ) -> Result<super::AccessPrincipalId, FileStashPrincipalResolutionError> {
+        self.authorize_file_stash_owner(identity, ceiling, owner, action, capability, now_millis)
+            .await
+            .map(|authorization| authorization.principal)
     }
 
     pub(crate) async fn resolve_file_stash_principal(
@@ -584,12 +841,17 @@ fn blocked_reason(error: &AccessStoreError) -> AccessBlockedReason {
         | AccessStoreError::MalformedVocabulary
         | AccessStoreError::ForeignKeyViolation => AccessBlockedReason::Corrupt,
         AccessStoreError::UnsupportedSchema { .. } => AccessBlockedReason::NewerSchema,
+        AccessStoreError::MigrationApprovalRequired { .. } => AccessBlockedReason::Unavailable,
+        AccessStoreError::MigrationEvidenceInvalid { .. } => AccessBlockedReason::Unavailable,
         AccessStoreError::Locked => AccessBlockedReason::Locked,
         AccessStoreError::ReadOnly => AccessBlockedReason::ReadOnly,
         AccessStoreError::DiskFull
         | AccessStoreError::MissingParent { .. }
         | AccessStoreError::BootstrapConflict
         | AccessStoreError::InvalidBootstrapInput
+        | AccessStoreError::InvalidTeamInput
+        | AccessStoreError::TeamUnavailable
+        | AccessStoreError::LastActiveTeamOwner
         | AccessStoreError::IdentityUnavailable
         | AccessStoreError::ProjectAccessUnavailable
         | AccessStoreError::NotAuthorized
@@ -637,6 +899,7 @@ fn credential_runtime_error(error: AccessStoreError) -> CredentialLifecycleError
 mod tests {
     use super::*;
     use labby_auth::{Authenticator, VerifiedIdentity};
+    use labby_primitives::access::{Capability, OwnerScope, TeamId};
 
     fn secure_test_path(directory: &tempfile::TempDir) -> PathBuf {
         #[cfg(unix)]
@@ -986,6 +1249,160 @@ mod tests {
             runtime.status().await,
             AccessRuntimeStatus::Blocked(AccessBlockedReason::Locked)
         );
+    }
+
+    #[tokio::test]
+    async fn team_stash_rechecks_membership_while_an_open_handle_and_personal_scope_survive() {
+        use crate::access::{AddTeamMemberInput, CreateTeamInput, TeamMembershipInput, TeamRole};
+        use rusqlite::params;
+        use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
+
+        let directory = super::super::test_support::secure_tempdir();
+        let path = secure_test_path(&directory);
+        let runtime = AccessRuntime::initialize(path).await;
+        let owner = VerifiedIdentity::external(
+            Authenticator::BrowserSession,
+            "https://accounts.google.com",
+            "owner",
+        )
+        .unwrap();
+        runtime
+            .bootstrap_owner(BootstrapOwnerInput::new(owner.clone(), "Local", "Default").unwrap())
+            .await
+            .unwrap();
+        let store = runtime.store().await.unwrap();
+        let member = VerifiedIdentity::external(
+            Authenticator::BrowserSession,
+            "https://accounts.google.com",
+            "member",
+        )
+        .unwrap();
+        store
+            .with_connection(|connection| {
+                connection.execute(
+                    "INSERT INTO principals(principal_id,organization_id,kind,status,display_name,created_at,updated_at) VALUES('member-principal','bootstrap-local','user','active',NULL,2,2)",
+                    [],
+                ).map_err(super::super::store::map_sqlite_error)?;
+                connection.execute(
+                    "INSERT INTO principal_links(link_id,principal_id,link_kind,issuer,subject,credential_id,status,verification_generation,link_generation,created_at,updated_at) VALUES('member-link','member-principal','external','https://accounts.google.com',?1,NULL,'active',1,1,2,2)",
+                    params!["member"],
+                ).map_err(super::super::store::map_sqlite_error)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        store
+            .create_team(CreateTeamInput::new(owner.clone(), "stash-team", "Stash Team").unwrap())
+            .await
+            .unwrap();
+        store
+            .add_team_member(
+                AddTeamMemberInput::new(
+                    owner.clone(),
+                    "stash-team",
+                    "member-principal",
+                    TeamRole::Member,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let team = OwnerScope::Team(TeamId::new("stash-team").unwrap());
+        let ceiling = crate::access::AuthorityCeiling::trusted_local();
+        assert!(
+            runtime
+                .resolve_file_stash_owner(
+                    member.clone(),
+                    ceiling.clone(),
+                    team.clone(),
+                    "stash.list",
+                    Capability::ScopeRead,
+                    10
+                )
+                .await
+                .is_ok()
+        );
+        assert!(
+            runtime
+                .resolve_file_stash_owner(
+                    member.clone(),
+                    ceiling.clone(),
+                    team.clone(),
+                    "stash.rename",
+                    Capability::ScopeManage,
+                    10
+                )
+                .await
+                .is_err()
+        );
+
+        store
+            .set_team_member_role(
+                AddTeamMemberInput::new(
+                    owner.clone(),
+                    "stash-team",
+                    "member-principal",
+                    TeamRole::Admin,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let issued_at = u64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        )
+        .unwrap();
+        let admitted = runtime
+            .authorize_file_stash_owner(
+                member.clone(),
+                ceiling.clone(),
+                team.clone(),
+                "stash.rename",
+                Capability::ScopeManage,
+                issued_at,
+            )
+            .await
+            .unwrap();
+        admitted.validate_before_commit().await.unwrap();
+
+        let blob_path = directory.path().join("already-open");
+        tokio::fs::write(&blob_path, b"finish me").await.unwrap();
+        let mut already_open = tokio::fs::File::open(&blob_path).await.unwrap();
+        store
+            .remove_team_member(
+                TeamMembershipInput::new(owner, "stash-team", "member-principal").unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            admitted.validate_before_commit().await.is_err(),
+            "a retained Team Stash binding must observe revocation before commit"
+        );
+        assert!(
+            runtime
+                .resolve_file_stash_owner(
+                    member.clone(),
+                    ceiling,
+                    team,
+                    "stash.list",
+                    Capability::ScopeRead,
+                    12
+                )
+                .await
+                .is_err()
+        );
+        let personal = runtime.resolve_file_stash_principal(member).await;
+        assert!(
+            personal.is_ok(),
+            "team removal must not remove personal storage"
+        );
+        already_open.rewind().await.unwrap();
+        let mut bytes = Vec::new();
+        already_open.read_to_end(&mut bytes).await.unwrap();
+        assert_eq!(bytes, b"finish me", "an admitted open may finish");
     }
 
     #[tokio::test]

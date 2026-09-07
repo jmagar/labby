@@ -214,6 +214,8 @@ impl BuiltinMcpRunner {
         drop(rustls::crypto::ring::default_provider().install_default());
         let mut builder = LiveLabbyBuilder::new()
             .env("LABBY_MCP_HTTP_TOKEN", TEST_TOKEN)
+            .env("LABBY_E2E_BOOTSTRAP_STATIC_OWNER", "1")
+            .env("LABBY_E2E_TEAM_ID", "bootstrap-initial-team")
             // The host's optional Claude installation must not change the
             // action-matrix result. Exercise the declared unavailable-inventory
             // contract deterministically on every CI runner.
@@ -378,8 +380,16 @@ impl BuiltinMcpRunner {
         &self,
         service: &str,
         action: &str,
-        params: serde_json::Map<String, serde_json::Value>,
+        mut params: serde_json::Map<String, serde_json::Value>,
     ) -> Result<CallToolResult, String> {
+        if service == "gateway"
+            && (action.starts_with("gateway.loadout.")
+                || action.starts_with("gateway.protected_route."))
+        {
+            params
+                .entry("team_id")
+                .or_insert_with(|| serde_json::Value::String("bootstrap-initial-team".to_owned()));
+        }
         let deadline = tokio::time::Instant::now() + REQUEST_TIMEOUT;
         let _outstanding = self
             .outstanding

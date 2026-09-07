@@ -1,7 +1,10 @@
+use std::collections::BTreeSet;
+
 use labby_auth::{PrincipalLink, VerifiedIdentity};
+use labby_primitives::access::{Capability, CapabilitySchemaVersion, RoleTemplate};
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
-use super::domain::{ProjectRole, validate_loadout_name};
+use super::domain::{ProjectRole, TeamRole, validate_loadout_name};
 use super::error::{AccessStoreError, AccessStoreResult};
 use super::store::map_sqlite_error;
 
@@ -25,6 +28,145 @@ pub(crate) struct ProjectAccessSnapshot {
     pub(crate) role: ProjectRole,
     pub(crate) loadout_name: String,
     pub(crate) global_revision: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SessionAuthoritySnapshot {
+    pub(crate) principal_id: String,
+    pub(crate) organization_id: String,
+    pub(crate) platform_administrator: bool,
+    pub(crate) teams: Vec<(String, TeamRole, u64, u64)>,
+    pub(crate) projects: Vec<(String, ProjectRole)>,
+    pub(crate) capabilities: Vec<Capability>,
+    pub(crate) authority_generation: u64,
+}
+
+pub(super) fn session_authority(
+    connection: &mut Connection,
+    identity: &VerifiedIdentity,
+) -> AccessStoreResult<SessionAuthoritySnapshot> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Deferred)
+        .map_err(map_sqlite_error)?;
+    let principal = resolve_principal(&transaction, identity)?;
+    let authority_generation = global_revision(&transaction)?;
+    let platform_administrator = transaction
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM platform_administrators WHERE principal_id=?1 AND status='active')",
+            [&principal.id],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(map_sqlite_error)?;
+
+    let mut teams = Vec::new();
+    {
+        let mut statement = transaction
+            .prepare(
+                "SELECT tm.team_id,tm.role,g.membership_epoch,g.policy_epoch
+             FROM team_memberships tm JOIN groups g
+               ON g.organization_id=tm.organization_id AND g.group_id=tm.team_id
+             WHERE tm.organization_id=?1 AND tm.principal_id=?2
+               AND tm.status='active' AND g.status='active'
+             ORDER BY tm.team_id COLLATE BINARY",
+            )
+            .map_err(map_sqlite_error)?;
+        let rows = statement
+            .query_map(params![principal.organization_id, principal.id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })
+            .map_err(map_sqlite_error)?;
+        for row in rows {
+            let (id, role, membership_epoch, policy_epoch) = row.map_err(map_sqlite_error)?;
+            teams.push((
+                id,
+                TeamRole::from_persisted(&role).ok_or(AccessStoreError::MalformedVocabulary)?,
+                epoch_u64(membership_epoch)?,
+                epoch_u64(policy_epoch)?,
+            ));
+        }
+    }
+
+    let mut projects = Vec::new();
+    {
+        let mut statement = transaction.prepare(
+            "WITH candidates(project_id,role) AS (
+               SELECT pm.project_id,pm.role FROM project_memberships pm JOIN projects p
+                 ON p.organization_id=pm.organization_id AND p.project_id=pm.project_id
+               WHERE pm.organization_id=?1 AND pm.principal_id=?2 AND pm.status='active' AND p.status='active'
+               UNION ALL
+               SELECT a.project_id,a.role FROM team_memberships tm JOIN groups g
+                 ON g.organization_id=tm.organization_id AND g.group_id=tm.team_id
+               JOIN team_project_assignments a ON a.organization_id=tm.organization_id AND a.team_id=tm.team_id
+               JOIN projects p ON p.organization_id=a.organization_id AND p.project_id=a.project_id
+               WHERE tm.organization_id=?1 AND tm.principal_id=?2 AND tm.status='active'
+                 AND g.status='active' AND a.status='active' AND p.status='active'
+             ) SELECT project_id,MAX(CASE role WHEN 'owner' THEN 4 WHEN 'admin' THEN 3 WHEN 'member' THEN 2 WHEN 'viewer' THEN 1 ELSE 0 END)
+               FROM candidates GROUP BY project_id ORDER BY project_id COLLATE BINARY",
+        ).map_err(map_sqlite_error)?;
+        let rows = statement
+            .query_map(params![principal.organization_id, principal.id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(map_sqlite_error)?;
+        for row in rows {
+            let (id, rank) = row.map_err(map_sqlite_error)?;
+            let role = match rank {
+                4 => ProjectRole::Owner,
+                3 => ProjectRole::Admin,
+                2 => ProjectRole::Member,
+                1 => ProjectRole::Viewer,
+                _ => return Err(AccessStoreError::MalformedVocabulary),
+            };
+            projects.push((id, role));
+        }
+    }
+
+    let mut capabilities = BTreeSet::new();
+    let mut add = |role: RoleTemplate| {
+        capabilities.extend(
+            role.capabilities(CapabilitySchemaVersion::V1)
+                .unwrap_or_default(),
+        );
+    };
+    add(if platform_administrator {
+        RoleTemplate::PlatformAdmin
+    } else {
+        RoleTemplate::PersonalUser
+    });
+    for (_, role, _, _) in &teams {
+        add(match role {
+            TeamRole::Owner => RoleTemplate::TeamOwner,
+            TeamRole::Admin => RoleTemplate::TeamAdmin,
+            TeamRole::Member => RoleTemplate::TeamMember,
+        });
+    }
+    for (_, role) in &projects {
+        add(match role {
+            ProjectRole::Owner => RoleTemplate::ProjectOwner,
+            ProjectRole::Admin => RoleTemplate::ProjectAdmin,
+            ProjectRole::Member => RoleTemplate::ProjectMember,
+            ProjectRole::Viewer => RoleTemplate::ProjectViewer,
+        });
+    }
+    transaction.commit().map_err(map_sqlite_error)?;
+    Ok(SessionAuthoritySnapshot {
+        principal_id: principal.id,
+        organization_id: principal.organization_id,
+        platform_administrator,
+        teams,
+        projects,
+        capabilities: capabilities.into_iter().copied().collect(),
+        authority_generation,
+    })
+}
+
+fn epoch_u64(value: i64) -> AccessStoreResult<u64> {
+    u64::try_from(value).map_err(|_| AccessStoreError::MalformedVocabulary)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -385,6 +527,30 @@ mod tests {
             store.list_accessible_projects(near).await,
             Err(AccessStoreError::IdentityUnavailable)
         ));
+    }
+
+    #[tokio::test]
+    async fn session_authority_is_an_atomic_durable_projection() {
+        let identity = external(Authenticator::BrowserSession);
+        let (_directory, store) = bootstrapped(identity.clone()).await;
+        let snapshot = store.session_authority(identity).await.unwrap();
+        assert_eq!(snapshot.principal_id, "bootstrap-owner");
+        assert_eq!(snapshot.organization_id, "bootstrap-local");
+        assert!(snapshot.platform_administrator);
+        assert!(
+            snapshot
+                .teams
+                .iter()
+                .any(|(id, role, _, _)| id == "bootstrap-initial-team" && *role == TeamRole::Owner)
+        );
+        assert!(
+            snapshot
+                .projects
+                .iter()
+                .any(|(id, role)| id == "bootstrap-default" && *role == ProjectRole::Owner)
+        );
+        assert!(snapshot.capabilities.contains(&Capability::PlatformManage));
+        assert!(snapshot.authority_generation > 0);
     }
 
     #[tokio::test]

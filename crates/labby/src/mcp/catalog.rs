@@ -211,11 +211,12 @@ impl LabMcpServer {
                     && code_mode_read_scope_allowed(auth),
                 #[cfg(not(feature = "skills"))]
                 skill_library_app_visible: false,
-                oauth_subject: oauth_upstream_subject_for_request(
-                    auth,
-                    self.request_subject(context),
-                )
-                .map(std::borrow::Cow::into_owned),
+                oauth_subject: self
+                    .route_oauth_subject(oauth_upstream_subject_for_request(
+                        auth,
+                        self.request_subject(context),
+                    ))
+                    .map(std::borrow::Cow::into_owned),
                 project_listing: crate::mcp::peer_contract::ProjectPeerListing::from_extensions(
                     &context.extensions,
                 ),

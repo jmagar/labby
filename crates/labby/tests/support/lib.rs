@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_imports)]
 
 pub(crate) mod action_matrix;
+pub(crate) mod authority_matrix;
 pub(crate) mod evidence;
 pub(crate) mod live_labby;
 

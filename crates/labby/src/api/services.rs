@@ -38,14 +38,19 @@ pub(crate) fn require_session_csrf(
 pub mod auth_admin;
 pub mod browser;
 
+pub mod access;
 /// Browser-session-only owner bootstrap (`/v1/access/bootstrap-owner`).
 pub mod access_bootstrap;
 pub mod access_bootstrap_proof;
 pub mod access_credentials;
+pub mod agents;
+pub mod projects;
+pub mod tasks;
 
 /// `GET /v1/catalog` — filtered service+action catalog for the ⌘K palette.
 pub mod catalog;
 pub mod depot;
+pub mod dev_containers;
 pub mod doctor;
 pub mod file_stash;
 #[cfg(feature = "gateway")]

@@ -1,4 +1,6 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+
+use sha2::{Digest, Sha256};
 
 use crate::config::{GatewayLoadoutConfig, ProtectedGatewaySubsetTarget, ProtectedMcpRouteConfig};
 
@@ -46,6 +48,9 @@ pub(crate) enum McpRouteScope {
         expose_prompts: bool,
         expose_skills: bool,
         expose_code_mode: bool,
+        authority_partition: String,
+        team_id: Option<String>,
+        credential_bindings: BTreeMap<String, (String, u64)>,
     },
 }
 
@@ -97,6 +102,9 @@ impl McpRouteScope {
             expose_prompts: capabilities.expose_prompts,
             expose_skills: capabilities.expose_skills,
             expose_code_mode: capabilities.expose_code_mode,
+            authority_partition: "unbound".to_owned(),
+            team_id: None,
+            credential_bindings: BTreeMap::new(),
         }
     }
 
@@ -124,12 +132,14 @@ impl McpRouteScope {
                     route.name
                 )
             })?;
-            return Ok(Some(Self::protected_subset_with_capabilities(
+            let mut scope = Self::protected_subset_with_capabilities(
                 route.name.clone(),
                 effective.upstreams.iter().map(String::as_str),
                 effective.services.iter().map(String::as_str),
                 McpRouteCapabilityGates::from_loadout(&effective),
-            )));
+            );
+            scope.bind_loadout_authority(&effective);
+            return Ok(Some(scope));
         }
         Ok(Some(Self::protected_subset(
             route.name.clone(),
@@ -144,6 +154,39 @@ impl McpRouteScope {
             Self::Root => "root".to_string(),
             Self::ProtectedSubset { route_name, .. } => format!("protected:{route_name}"),
         }
+    }
+
+    fn bind_loadout_authority(&mut self, loadout: &GatewayLoadoutConfig) {
+        let Self::ProtectedSubset {
+            authority_partition,
+            team_id,
+            credential_bindings,
+            ..
+        } = self
+        else {
+            return;
+        };
+        let mut digest = Sha256::new();
+        *team_id = loadout
+            .name
+            .strip_prefix("team:")
+            .and_then(|rest| rest.split_once(':'))
+            .map(|(team, _)| team.to_owned());
+        for binding in &loadout.credential_bindings {
+            for value in [
+                binding.upstream_name.as_bytes(),
+                binding.binding_id.as_bytes(),
+                &binding.generation.to_be_bytes(),
+            ] {
+                digest.update((value.len() as u64).to_be_bytes());
+                digest.update(value);
+            }
+            credential_bindings.insert(
+                binding.upstream_name.clone(),
+                (binding.binding_id.clone(), binding.generation),
+            );
+        }
+        *authority_partition = hex::encode(digest.finalize());
     }
 
     pub(crate) fn protected_history_label(&self) -> Option<String> {
@@ -221,12 +264,43 @@ impl McpRouteScope {
         }
     }
 
+    pub(crate) fn team_credential_subject(&self) -> Option<String> {
+        match self {
+            Self::ProtectedSubset { team_id, .. } => {
+                team_id.as_ref().map(|team| format!("team:{team}"))
+            }
+            Self::Root => None,
+        }
+    }
+
+    pub(crate) fn team_credential_binding(&self, upstream: &str) -> Option<(&str, &str, u64)> {
+        match self {
+            Self::ProtectedSubset {
+                team_id: Some(team_id),
+                credential_bindings,
+                ..
+            } => credential_bindings
+                .get(upstream)
+                .map(|(binding_id, generation)| {
+                    (team_id.as_str(), binding_id.as_str(), *generation)
+                }),
+            _ => None,
+        }
+    }
+
     #[cfg(feature = "gateway")]
     pub(crate) fn task_authorization(
         &self,
     ) -> labby_gateway::upstream::pool::TaskRouteAuthorization {
+        let route_key = match self {
+            Self::Root => self.label(),
+            Self::ProtectedSubset {
+                authority_partition,
+                ..
+            } => format!("{}:{authority_partition}", self.label()),
+        };
         labby_gateway::upstream::pool::TaskRouteAuthorization::new(
-            self.label(),
+            route_key,
             self.allowed_upstreams().cloned(),
         )
     }
@@ -326,6 +400,56 @@ mod tests {
         assert!(!scope.exposes_prompts());
         assert!(scope.exposes_skills());
         assert!(scope.exposes_code_mode());
+    }
+
+    #[cfg(feature = "gateway")]
+    #[test]
+    fn credential_rotation_invalidates_retained_task_authority() {
+        use labby_runtime::gateway_config::GatewayCredentialBindingRef;
+        let route = ProtectedMcpRouteConfig {
+            name: "team-route".into(),
+            enabled: true,
+            public_host: "mcp.example.com".into(),
+            public_path: "/team".into(),
+            upstream: None,
+            backend_url: String::new(),
+            backend_mcp_path: "/mcp".into(),
+            scopes: vec![],
+            health_path: None,
+            target: Some(crate::config::ProtectedMcpRouteTarget::GatewaySubset(
+                ProtectedGatewaySubsetTarget {
+                    loadout: Some("team:alpha:prod".into()),
+                    ..Default::default()
+                },
+            )),
+        };
+        let loadout = |generation| GatewayLoadoutConfig {
+            name: "team:alpha:prod".into(),
+            upstreams: vec!["shared".into()],
+            credential_bindings: vec![GatewayCredentialBindingRef {
+                upstream_name: "shared".into(),
+                binding_id: "alpha-binding".into(),
+                generation,
+            }],
+            ..GatewayLoadoutConfig::default()
+        };
+        let before = McpRouteScope::from_protected_route(&route, &[loadout(1)])
+            .unwrap()
+            .unwrap();
+        let after = McpRouteScope::from_protected_route(&route, &[loadout(2)])
+            .unwrap()
+            .unwrap();
+        assert_ne!(before.task_authorization(), after.task_authorization());
+        assert_eq!(before.label(), after.label());
+        assert_eq!(
+            before.team_credential_subject().as_deref(),
+            Some("team:alpha")
+        );
+        assert_eq!(
+            before.team_credential_binding("shared"),
+            Some(("alpha", "alpha-binding", 1))
+        );
+        assert_eq!(before.team_credential_binding("other"), None);
     }
 
     #[test]

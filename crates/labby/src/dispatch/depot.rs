@@ -3,6 +3,7 @@
 pub mod admin;
 #[cfg(test)]
 mod admin_tests;
+pub(crate) mod authority_projection;
 pub mod cursor;
 #[cfg(test)]
 mod cursor_tests;

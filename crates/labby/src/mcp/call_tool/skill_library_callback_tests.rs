@@ -827,7 +827,7 @@ async fn authenticated_http_call_tool_reaches_process_library_for_read_and_mutat
     }
     assert!(resource_facts.windows(2).all(|pair| pair[0] == pair[1]));
 
-    let member_denied = Box::pin(running.service().call_tool_impl(
+    let member_mutation = Box::pin(running.service().call_tool_impl(
         call(
             "artifacts.deactivate",
             serde_json::json!({
@@ -839,53 +839,11 @@ async fn authenticated_http_call_tool_reaches_process_library_for_read_and_mutat
         context(&pujit),
     ))
     .await
-    .expect("member denial response");
-    assert!(member_denied.is_error.unwrap_or(false));
-    let member_denied_envelope = member_denied.structured_content.clone().unwrap_or_else(|| {
-        serde_json::from_str(
-            member_denied.content[0]
-                .as_text()
-                .expect("member denial text")
-                .text
-                .as_str(),
-        )
-        .expect("member denial envelope")
-    });
-    assert_eq!(member_denied_envelope["error"]["kind"], "forbidden");
+    .expect("member mutation response");
+    assert!(!member_mutation.is_error.unwrap_or(false));
 
-    let unchanged = Box::pin(running.service().call_tool_impl(
-        call(
-            "artifacts.get",
-            serde_json::json!({"artifact_id": artifact_id}),
-        ),
-        context(&eli),
-    ))
-    .await
-    .expect("owner observes state after member denial");
-    assert!(!unchanged.is_error.unwrap_or(false), "{unchanged:?}");
-    let unchanged = value(&unchanged);
-    assert_eq!(unchanged["active_revision_id"], expected_revision);
-    assert_eq!(unchanged["latest_revision_id"], expected_revision);
-    assert_eq!(unchanged["published_library_version"], 2);
-    assert_eq!(unchanged["current_generation"], 2);
-
-    let admin_deactivated = Box::pin(running.service().call_tool_impl(
-        call(
-            "artifacts.deactivate",
-            serde_json::json!({
-                "artifact_id": artifact_id,
-                "expected_library_version": 2,
-                "idempotency_key": "jake-admin-deactivate"
-            }),
-        ),
-        context(&jake),
-    ))
-    .await
-    .expect("admin mutation response");
-    assert!(
-        !admin_deactivated.is_error.unwrap_or(false),
-        "{admin_deactivated:?}"
-    );
+    let member_mutation = value(&member_mutation);
+    assert_eq!(member_mutation["artifact_id"], artifact_id);
 }
 
 #[cfg(feature = "gateway")]

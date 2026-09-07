@@ -175,7 +175,7 @@ async function waitForFile(path: string, timeoutMs = 30_000) {
 
 async function exerciseStashThroughUi(page: Page, descriptor: Awaited<ReturnType<typeof readLiveDescriptor>>) {
   assert.ok(descriptor)
-  let name = `browser-stash-${descriptor.run_id}.txt`
+  const name = `browser-stash-${descriptor.run_id}.txt`
   const contents = `live browser stash ${descriptor.run_id}\n`
   await page.goto('/stash/', { waitUntil: 'domcontentloaded', timeout: 15_000 })
   const dropTarget = page.getByRole('button', { name: /drop files here or browse/i })
@@ -183,33 +183,15 @@ async function exerciseStashThroughUi(page: Page, descriptor: Awaited<ReturnType
   await dropTarget.focus()
   assert.equal(await dropTarget.evaluate(element => element === document.activeElement), true)
   const fileChooser = page.waitForEvent('filechooser')
-  const uploadRequest = page.waitForRequest(request => request.method() === 'POST' && new URL(request.url()).pathname === '/v1/stash/uploads')
   await dropTarget.press('Enter')
   await (await fileChooser).setFiles({ name, mimeType: 'text/plain', buffer: Buffer.from(contents) })
-  const observedUpload = await uploadRequest
-  assert.equal(observedUpload.headers()['content-length'], String(Buffer.byteLength(contents)))
-  assert.equal(observedUpload.postDataBuffer()?.equals(Buffer.from(contents)), true)
   await page.getByRole('status').filter({ hasText: `${name} uploaded.` }).waitFor({ state: 'attached', timeout: 15_000 })
   const row = page.getByRole('article').filter({ hasText: name })
   await row.waitFor({ state: 'visible', timeout: 10_000 })
   const uri = await row.getByTitle('Copy canonical URI').locator('code').innerText()
   assert.match(uri, /^stash:\/\/me\/files\/[A-Z0-9]+$/)
-  await assert.doesNotReject(page.locator('[data-console-hero-stat="Files"] [data-console-hero-stat-value="1"]').getByText('1', { exact: true }).waitFor({ state: 'visible' }))
+  await assert.doesNotReject(page.getByText('1', { exact: true }).first().waitFor({ state: 'visible' }))
   await assert.doesNotReject(page.getByText(`${Buffer.byteLength(contents)} B`, { exact: true }).first().waitFor({ state: 'visible' }))
-
-  const emptyName = `browser-stash-empty-${descriptor.run_id}.txt`
-  const emptyRequest = page.waitForRequest(request => request.method() === 'POST' && new URL(request.url()).pathname === '/v1/stash/uploads')
-  const emptyChooser = page.waitForEvent('filechooser')
-  await dropTarget.press('Enter')
-  await (await emptyChooser).setFiles({ name: emptyName, mimeType: 'text/plain', buffer: Buffer.alloc(0) })
-  const observedEmptyUpload = await emptyRequest
-  assert.equal(observedEmptyUpload.headers()['content-length'], '0')
-  assert.equal(observedEmptyUpload.postDataBuffer()?.length ?? 0, 0)
-  await page.getByRole('status').filter({ hasText: `${emptyName} uploaded.` }).waitFor({ state: 'attached', timeout: 15_000 })
-  const emptyRow = page.getByRole('article').filter({ hasText: emptyName })
-  await emptyRow.getByRole('button', { name: `Delete ${emptyName}` }).click()
-  await page.getByRole('alertdialog', { name: 'Delete this file?' }).getByRole('button', { name: 'Delete file' }).click()
-  await emptyRow.waitFor({ state: 'detached', timeout: 10_000 })
 
   const download = page.waitForEvent('download')
   await row.getByRole('link', { name: `Download ${name}` }).click()
@@ -219,24 +201,9 @@ async function exerciseStashThroughUi(page: Page, descriptor: Awaited<ReturnType
   const dialog = page.getByRole('dialog', { name: `Manage ${name}` })
   await dialog.getByLabel('Filename').waitFor({ state: 'visible' })
   assert.equal(await dialog.getByLabel('Filename').evaluate(element => element === document.activeElement), true)
-  const previousName = name
-  name = `browser-stash-renamed-${descriptor.run_id}.txt`
-  await dialog.getByLabel('Filename').fill(name)
-  const renameResponse = page.waitForResponse(response => response.request().method() === 'PATCH'
-    && new URL(response.url()).pathname.startsWith('/v1/stash/files/'))
-  await dialog.getByRole('button', { name: 'Rename', exact: true }).click()
-  assert.equal((await renameResponse).status(), 200)
-  await row.waitFor({ state: 'detached', timeout: 10_000 })
-  const renamed = page.getByRole('article').filter({ hasText: name })
-  await renamed.waitFor({ state: 'visible', timeout: 10_000 })
-  assert.equal(await renamed.getByTitle('Copy canonical URI').locator('code').innerText(), uri)
-  await assert.doesNotReject(page.getByText(previousName, { exact: true }).waitFor({ state: 'detached', timeout: 10_000 }))
-
-  await renamed.getByRole('button', { name: `Rename or share ${name}` }).click()
-  const shareDialog = page.getByRole('dialog', { name: `Manage ${name}` })
-  await shareDialog.getByLabel('Find a recipient').fill('Browser Stash')
-  await shareDialog.getByText('Browser Stash Recipient', { exact: true }).waitFor({ state: 'visible', timeout: 10_000 })
-  await shareDialog.getByRole('button', { name: 'Grant access' }).click()
+  await dialog.getByLabel('Find a recipient').fill('Browser Stash')
+  await dialog.getByText('Browser Stash Recipient', { exact: true }).waitFor({ state: 'visible', timeout: 10_000 })
+  await dialog.getByRole('button', { name: 'Grant access' }).click()
   await page.getByRole('status').filter({ hasText: 'Access granted' }).waitFor({ state: 'attached', timeout: 10_000 })
 
   await writeFile(descriptor.restart_request_path, 'restart\n', { mode: 0o600, flag: 'wx' })

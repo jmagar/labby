@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { consoleNavItems, consoleNavSections } from './nav-model'
+import { capabilityAwareNavSections, capabilityForPath, consoleNavItems, consoleNavSections } from './nav-model'
 
 // bead lab-vl9q6
 test('every nav item kbd accelerator matches its position in the flattened list', () => {
@@ -55,4 +55,24 @@ test('browser bridge is a real control-plane destination', () => {
   const browsers = consoleNavItems.find((item) => item.id === 'Browsers')
   assert.ok(browsers)
   assert.equal(browsers.href, '/browsers')
+})
+
+test('one filtered model removes denied links and shortcut targets together', () => {
+  const member = capabilityAwareNavSections(['scope.read', 'scope.operate'])
+  const items = member.flatMap((section) => section.items)
+  const ids = items.map((item) => item.id)
+  assert.ok(ids.includes('Agents'))
+  assert.ok(ids.includes('Library'))
+  assert.ok(!ids.includes('Labby'))
+  assert.ok(!ids.includes('Logs'))
+  assert.ok(!ids.includes('Create'))
+  items.forEach((item, index) => assert.equal(item.kbd, `⌘${index + 1}`))
+})
+
+test('direct route manifest fails closed for unknown and settings routes', () => {
+  assert.equal(capabilityForPath('/settings/core'), 'platform.manage')
+  assert.equal(capabilityForPath('/dev-containers'), 'scope.operate')
+  assert.equal(capabilityForPath('/depot'), null)
+  assert.equal(capabilityForPath('/gateway'), 'platform.manage')
+  assert.equal(capabilityForPath('/not-a-product-route'), undefined)
 })

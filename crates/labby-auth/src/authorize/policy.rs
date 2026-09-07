@@ -65,20 +65,6 @@ pub(crate) fn validate_response_type(response_type: &str) -> Result<(), AuthErro
     ))
 }
 
-/// Elevates an allowlisted user to the admin scope associated with the configured base scope.
-pub(crate) fn elevate_scope_for_allowed_user(scope: &str, default_scope: &str) -> String {
-    let base = default_scope.split(':').next().unwrap_or(default_scope);
-    let admin_scope = format!("{base}:admin");
-    let mut scopes: Vec<&str> = scope
-        .split_whitespace()
-        .filter(|scope| !scope.is_empty())
-        .collect();
-    if !scopes.iter().any(|scope| *scope == admin_scope.as_str()) {
-        scopes.push(admin_scope.as_str());
-    }
-    scopes.join(" ")
-}
-
 pub(crate) fn validate_scope(
     state: &AuthState,
     resource: &str,

@@ -1,6 +1,7 @@
 import { gatewayRequestInit } from './gateway-request.ts'
 import {
   getBrowserSessionState,
+  getSessionAuthority,
   getSessionCsrfToken,
   loadBrowserSession,
   type BrowserSessionState,
@@ -95,6 +96,8 @@ export async function performServiceAction<T, TError extends ServiceActionError>
   createError: ActionErrorFactory<TError>
   source?: string
 }): Promise<T> {
+  const authority = getSessionAuthority()
+  const authorityIdentity = authority && `${authority.generation}:${authority.activeOwner.kind}:${authority.activeOwner.id}`
   const initialCsrfToken = getSessionCsrfToken()
   const attemptedSessionAuth = Boolean(initialCsrfToken)
 
@@ -118,7 +121,13 @@ export async function performServiceAction<T, TError extends ServiceActionError>
       )
     }
 
-    return parseActionResponse<T, TError>(response, createError)
+    const result = await parseActionResponse<T, TError>(response, createError)
+    const currentAuthority = getSessionAuthority()
+    const currentIdentity = currentAuthority && `${currentAuthority.generation}:${currentAuthority.activeOwner.kind}:${currentAuthority.activeOwner.id}`
+    if (authorityIdentity && authorityIdentity !== currentIdentity) {
+      throw new DOMException('Authority context changed', 'AbortError')
+    }
+    return result
   }
 
   try {

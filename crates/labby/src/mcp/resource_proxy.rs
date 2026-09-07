@@ -87,8 +87,12 @@ impl LabMcpServer {
         let auth = auth_context_from_extensions(&context.extensions);
         let scope = crate::dispatch::gateway::GatewayEnrichmentScope {
             route_visible_upstreams: self.route_scope.allowed_upstreams().cloned(),
-            oauth_subject: oauth_upstream_subject_for_request(auth, self.request_subject(context))
-                .map(|subject| subject.into_owned()),
+            oauth_subject: self
+                .route_oauth_subject(oauth_upstream_subject_for_request(
+                    auth,
+                    self.request_subject(context),
+                ))
+                .map(std::borrow::Cow::into_owned),
         };
         let json = if uri == "lab://gateway/servers" {
             manager.gateway_servers_doc_scoped(&scope).await.map(Some)
@@ -381,7 +385,10 @@ impl LabMcpServer {
     ) -> Result<ReadResourceResponse, ErrorData> {
         let uri = request.uri.clone();
         let auth = auth_context_from_extensions(&context.extensions);
-        let oauth_subject = oauth_upstream_subject_for_request(auth, self.request_subject(context));
+        let oauth_subject = self.route_oauth_subject(oauth_upstream_subject_for_request(
+            auth,
+            self.request_subject(context),
+        ));
         if let Some(oauth_subject) = oauth_subject.as_ref() {
             let configs = self.route_scoped_oauth_upstream_configs().await;
             match pool

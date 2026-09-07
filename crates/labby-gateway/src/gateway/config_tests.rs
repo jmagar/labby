@@ -1,6 +1,50 @@
 use labby_runtime::gateway_config::{
-    GatewayConfig, GatewayLoadoutConfig, ProtectedMcpRouteConfig, UpstreamConfig, UpstreamTransport,
+    GatewayConfig, GatewayCredentialBindingRef, GatewayLoadoutConfig, ProtectedMcpRouteConfig,
+    UpstreamConfig, UpstreamTransport,
 };
+
+#[test]
+fn loadout_credential_bindings_are_redacted_and_upstream_scoped() {
+    let mut cfg = sample_config();
+    cfg.loadouts.push(GatewayLoadoutConfig {
+        name: "team:alpha:prod".into(),
+        upstreams: vec!["a".into()],
+        credential_bindings: vec![GatewayCredentialBindingRef {
+            upstream_name: "a".into(),
+            binding_id: "binding-alpha".into(),
+            generation: 2,
+        }],
+        ..GatewayLoadoutConfig::default()
+    });
+    validate_config(&cfg).expect("redacted binding for a selected upstream is valid");
+    let encoded = serde_json::to_string(&cfg.loadouts[0]).unwrap();
+    assert!(encoded.contains("binding-alpha"));
+    assert!(!encoded.contains("token"));
+
+    cfg.loadouts[0].credential_bindings[0].upstream_name = "b".into();
+    let error = validate_config(&cfg).expect_err("cross-upstream credential use must fail");
+    assert_eq!(error.kind(), "invalid_param");
+}
+
+#[test]
+fn loadout_rejects_stale_or_ambiguous_credential_generations() {
+    let mut cfg = sample_config();
+    let binding = GatewayCredentialBindingRef {
+        upstream_name: "a".into(),
+        binding_id: "binding-alpha".into(),
+        generation: 1,
+    };
+    cfg.loadouts.push(GatewayLoadoutConfig {
+        name: "team:alpha:prod".into(),
+        upstreams: vec!["a".into()],
+        credential_bindings: vec![binding.clone(), binding],
+        ..GatewayLoadoutConfig::default()
+    });
+    assert!(validate_config(&cfg).is_err());
+    cfg.loadouts[0].credential_bindings.truncate(1);
+    cfg.loadouts[0].credential_bindings[0].generation = 0;
+    assert!(validate_config(&cfg).is_err());
+}
 
 use super::*;
 

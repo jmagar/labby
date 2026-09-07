@@ -12,13 +12,15 @@
 use std::sync::{Arc, Mutex};
 
 use arc_swap::ArcSwap;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use labby_runtime::artifacts::{
     ArtifactError, ArtifactRevision, ArtifactStore, LibraryIdempotency, LibraryMutation,
     LibraryMutationOutcome, LibrarySnapshot, LibraryTimestamp, SkillLibraryFile,
     SkillLibraryRecord, SkillTransactionBoundary, SkillVisibility,
 };
-use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
 
 use crate::access::AccessRuntime;
 
@@ -146,7 +148,6 @@ impl<G: Send + Sync + 'static> SkillLibraryService<G> {
         let projection = Arc::clone(&self.projection);
         let publication = Arc::clone(&self.publication);
         let faults = Arc::clone(&self.faults);
-        let response_target = target_id.clone();
         let outcome = self
             .blocking
             .run_after_admission("skill_artifact_import_commit", || async move {
@@ -164,6 +165,15 @@ impl<G: Send + Sync + 'static> SkillLibraryService<G> {
                 let authorization = decision.authorization;
                 let ownership = decision.ownership;
                 let audit = decision.audit;
+                let mut materialized = materialized;
+                labby_runtime::artifacts::qualify_materialized_skill_owner(
+                    &mut materialized,
+                    &ownership,
+                )?;
+                let target_id = materialized.interchange.descriptor.id.clone();
+                let audit = audit.with_target(&CanonicalArtifactId::parse(target_id.clone())?);
+                let request_digest =
+                    bind_idempotency_to_owner(&request_digest, &ownership, project_id)?;
                 let audited_revision_id = revision_id.clone();
                 let mutation = LibraryMutation::Create {
                     record: SkillLibraryRecord {
@@ -229,6 +239,7 @@ impl<G: Send + Sync + 'static> SkillLibraryService<G> {
             })
             .await
             .map_err(map_dispatch_blocking)?;
+        let response_target = outcome.receipt().artifact_id.clone();
         self.mutation_response(response_target, outcome, false)
             .await
     }
@@ -483,7 +494,7 @@ impl<G: Send + Sync + 'static> SkillLibraryService<G> {
         };
         let preparation_store = Arc::clone(&self.store);
         let requested_artifact_id = artifact_id.clone();
-        let (candidate_artifact, target_ownership) = self
+        let (mut candidate_artifact, target_ownership) = self
             .blocking
             .run("skill_artifact_prepare", move || {
                 let logical = files
@@ -512,6 +523,15 @@ impl<G: Send + Sync + 'static> SkillLibraryService<G> {
             })
             .await
             .map_err(map_target_lookup)?;
+        if let (Some(expected_id), Some(ownership)) =
+            (artifact_id.as_ref(), target_ownership.as_ref())
+            && candidate_artifact.interchange.descriptor.id != *expected_id
+        {
+            labby_runtime::artifacts::qualify_materialized_skill_owner(
+                &mut candidate_artifact,
+                ownership,
+            )?;
+        }
         if let Some(expected_id) = artifact_id.as_ref()
             && candidate_artifact.interchange.descriptor.id != *expected_id
         {
@@ -534,7 +554,6 @@ impl<G: Send + Sync + 'static> SkillLibraryService<G> {
         let publication = Arc::clone(&self.publication);
         let faults = Arc::clone(&self.faults);
         let expected_head = expected_revision_id;
-        let response_artifact_id = artifact_id.clone();
         let outcome = self
             .blocking
             .run_after_admission("skill_artifact_commit", || async move {
@@ -549,9 +568,28 @@ impl<G: Send + Sync + 'static> SkillLibraryService<G> {
                 )
                 .await
                 .map_err(SkillLibraryDispatchError::Authorization)?;
-                let authorization = decision.authorization;
-                let ownership = decision.ownership;
-                let audit = decision.audit;
+                let (authorization, ownership, audit) = if action == SkillLibraryAction::Create
+                    && matches!(create_visibility, CreateVisibility::Shared)
+                {
+                    decision.into_shared_create()?
+                } else {
+                    (decision.authorization, decision.ownership, decision.audit)
+                };
+                let mut candidate_artifact = candidate_artifact;
+                if action == SkillLibraryAction::Create {
+                    labby_runtime::artifacts::qualify_materialized_skill_owner(
+                        &mut candidate_artifact,
+                        &ownership,
+                    )?;
+                }
+                let artifact_id = candidate_artifact.interchange.descriptor.id.clone();
+                let audit = if action == SkillLibraryAction::Create {
+                    audit.with_target(&CanonicalArtifactId::parse(artifact_id.clone())?)
+                } else {
+                    audit
+                };
+                let request_digest =
+                    bind_idempotency_to_owner(&request_digest, &ownership, project_id)?;
                 let mutation = if action == SkillLibraryAction::Create {
                     LibraryMutation::Create {
                         record: SkillLibraryRecord {
@@ -636,6 +674,7 @@ impl<G: Send + Sync + 'static> SkillLibraryService<G> {
             })
             .await
             .map_err(map_dispatch_blocking)?;
+        let response_artifact_id = outcome.receipt().artifact_id.clone();
         self.mutation_response(response_artifact_id, outcome, false)
             .await
     }
@@ -908,7 +947,14 @@ impl<G: Send + Sync + 'static> SkillLibraryService<G> {
                                 )
                             })
                             .ok_or(ArtifactError::NotFound("library_record"))?;
-                        let page = history_page(&store, record, params.cursor, params.limit)?;
+                        let page = history_page(
+                            &store,
+                            record,
+                            &decision,
+                            snapshot.version,
+                            params.cursor,
+                            params.limit,
+                        )?;
                         Ok(VersionedRevisionPage {
                             library_version: snapshot.version,
                             items: page.items,
@@ -921,7 +967,7 @@ impl<G: Send + Sync + 'static> SkillLibraryService<G> {
             }
             "artifacts.validate" => {
                 let params: ValidateParams = parse(params)?;
-                authorize_at_boundary(
+                let decision = authorize_at_boundary(
                     runtime,
                     caller,
                     project_id,
@@ -944,11 +990,16 @@ impl<G: Send + Sync + 'static> SkillLibraryService<G> {
                                 )
                             })
                             .collect();
-                        labby_runtime::artifacts::materialize_logical_skill(
+                        let mut materialized = labby_runtime::artifacts::materialize_logical_skill(
                             &params.name,
                             files,
                             Default::default(),
-                        )
+                        )?;
+                        labby_runtime::artifacts::qualify_materialized_skill_owner(
+                            &mut materialized,
+                            &decision.ownership,
+                        )?;
+                        Ok(materialized)
                     })
                     .await;
                 let response = match candidate {
@@ -1265,6 +1316,20 @@ fn published_version<G>(publication: &ActivationCoordinator<G>) -> u64 {
     }
 }
 
+fn bind_idempotency_to_owner(
+    request_digest: &str,
+    ownership: &labby_runtime::artifacts::LibraryOwnership,
+    project_id: &str,
+) -> Result<String, ArtifactError> {
+    labby_runtime::artifacts::canonical_json::digest(&(
+        request_digest,
+        ownership.tenant_id.as_str(),
+        ownership.owner_kind(),
+        ownership.owner_id.as_str(),
+        project_id,
+    ))
+}
+
 fn read_target(record: &SkillLibraryRecord) -> Result<SkillLibraryTarget<'_>, ArtifactError> {
     match record.visibility {
         SkillVisibility::Private => Ok(SkillLibraryTarget::Personal(&record.ownership)),
@@ -1292,7 +1357,13 @@ fn list_page_visible(
         field: "limit",
         reason,
     })?;
-    let lower_bound = cursor.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded);
+    let cursor_binding = ListCursorBinding::new(decision, snapshot.version, query);
+    let cursor = cursor
+        .map(|encoded| decode_list_cursor(&encoded, &cursor_binding))
+        .transpose()?;
+    let lower_bound = cursor.map_or(std::ops::Bound::Unbounded, |cursor| {
+        std::ops::Bound::Excluded(cursor.artifact_id)
+    });
     let records = snapshot
         .records
         .range((lower_bound, std::ops::Bound::Unbounded));
@@ -1322,13 +1393,18 @@ fn list_page_visible(
             )
         })
         .collect::<Vec<_>>();
-    let next_cursor = has_more.then(|| {
-        items
-            .last()
-            .expect("non-empty paginated page")
-            .artifact_id
-            .clone()
-    });
+    let next_cursor = has_more
+        .then(|| {
+            encode_list_cursor(
+                &cursor_binding,
+                items
+                    .last()
+                    .expect("non-empty paginated page")
+                    .artifact_id
+                    .clone(),
+            )
+        })
+        .transpose()?;
     Ok(VersionedSkillLibraryPage {
         library_version: snapshot.version,
         published_library_version,
@@ -1338,6 +1414,85 @@ fn list_page_visible(
         items,
         next_cursor,
     })
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+struct ListCursorBinding {
+    version: u8,
+    context_digest: String,
+    library_version: u64,
+    query_digest: Option<String>,
+}
+
+impl ListCursorBinding {
+    fn new(
+        decision: &super::auth::SkillLibraryAuthorizationDecision,
+        library_version: u64,
+        query: Option<&str>,
+    ) -> Self {
+        let (tenant, principal, project, authority_generation) = decision.cursor_binding();
+        let mut context = Sha256::new();
+        for value in [tenant, principal, project] {
+            context.update(value.len().to_be_bytes());
+            context.update(value.as_bytes());
+        }
+        for team_id in decision.cursor_team_ids() {
+            context.update(team_id.len().to_be_bytes());
+            context.update(team_id.as_bytes());
+        }
+        context.update(authority_generation.to_be_bytes());
+        Self {
+            version: 1,
+            context_digest: hex::encode(context.finalize()),
+            library_version,
+            query_digest: query.map(|value| hex::encode(Sha256::digest(value.as_bytes()))),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct ListCursor {
+    #[serde(flatten)]
+    binding: ListCursorBinding,
+    artifact_id: String,
+}
+
+fn encode_list_cursor(
+    binding: &ListCursorBinding,
+    artifact_id: String,
+) -> Result<String, ArtifactError> {
+    let bytes = serde_json::to_vec(&ListCursor {
+        binding: ListCursorBinding {
+            version: binding.version,
+            context_digest: binding.context_digest.clone(),
+            library_version: binding.library_version,
+            query_digest: binding.query_digest.clone(),
+        },
+        artifact_id,
+    })
+    .map_err(|_| invalid_list_cursor())?;
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
+}
+
+fn decode_list_cursor(
+    encoded: &str,
+    expected: &ListCursorBinding,
+) -> Result<ListCursor, ArtifactError> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(encoded)
+        .map_err(|_| invalid_list_cursor())?;
+    let cursor: ListCursor = serde_json::from_slice(&bytes).map_err(|_| invalid_list_cursor())?;
+    if cursor.binding != *expected || cursor.artifact_id.is_empty() {
+        return Err(invalid_list_cursor());
+    }
+    Ok(cursor)
+}
+
+fn invalid_list_cursor() -> ArtifactError {
+    ArtifactError::InvalidField {
+        field: "cursor",
+        reason: "context_mismatch",
+    }
 }
 
 fn artifact_matches(
@@ -1432,6 +1587,8 @@ fn validation_rejection(error: ArtifactError) -> Result<ValidationRejection, Art
 pub(crate) fn history_page(
     store: &ArtifactStore,
     record: &SkillLibraryRecord,
+    decision: &super::auth::SkillLibraryAuthorizationDecision,
+    library_version: u64,
     cursor: Option<String>,
     limit: Option<usize>,
 ) -> Result<CursorPage<RevisionSummary>, ArtifactError> {
@@ -1444,7 +1601,14 @@ pub(crate) fn history_page(
         reason,
     })?;
     let artifact = store.get(&record.artifact_id)?;
-    let (page_start, end) = history_page_window(&artifact.revision_ids, cursor.as_deref(), limit)?;
+    let binding = HistoryCursorBinding::new(
+        decision,
+        library_version,
+        &record.artifact_id,
+        &record.ownership,
+    );
+    let (page_start, end) =
+        history_page_window(&artifact.revision_ids, cursor.as_deref(), limit, &binding)?;
     let ids = artifact.revision_ids[page_start..end]
         .iter()
         .rev()
@@ -1459,49 +1623,110 @@ pub(crate) fn history_page(
         })
         .collect();
     let next_cursor = (page_start > 0)
-        .then(|| encode_history_cursor(page_start, ids.last().expect("non-empty paginated page")));
+        .then(|| {
+            encode_history_cursor(
+                &binding,
+                page_start,
+                ids.last().expect("non-empty paginated page"),
+            )
+        })
+        .transpose()?;
     Ok(CursorPage { items, next_cursor })
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+struct HistoryCursorBinding {
+    version: u8,
+    context_digest: String,
+    library_version: u64,
+    artifact_id: String,
+    owner_kind: labby_runtime::artifacts::LibraryOwnerKind,
+    owner_id: String,
+}
+
+impl HistoryCursorBinding {
+    fn new(
+        decision: &super::auth::SkillLibraryAuthorizationDecision,
+        library_version: u64,
+        artifact_id: &str,
+        ownership: &labby_runtime::artifacts::LibraryOwnership,
+    ) -> Self {
+        let list = ListCursorBinding::new(decision, library_version, None);
+        Self {
+            version: 1,
+            context_digest: list.context_digest,
+            library_version,
+            artifact_id: artifact_id.to_owned(),
+            owner_kind: ownership.owner_kind(),
+            owner_id: ownership.owner_id.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct HistoryCursor {
+    #[serde(flatten)]
+    binding: HistoryCursorBinding,
+    position: usize,
+    revision_id: String,
 }
 
 fn history_page_window(
     revision_ids: &[String],
     cursor: Option<&str>,
     limit: usize,
+    binding: &HistoryCursorBinding,
 ) -> Result<(usize, usize), ArtifactError> {
     let end = cursor.map_or(Ok(revision_ids.len()), |cursor| {
-        let (position, revision_id) = decode_history_cursor(cursor)?;
-        if revision_ids.get(position).map(String::as_str) != Some(revision_id) {
+        let cursor = decode_history_cursor(cursor, binding)?;
+        if revision_ids.get(cursor.position).map(String::as_str) != Some(&cursor.revision_id) {
             return Err(invalid_history_cursor());
         }
-        Ok(position)
+        Ok(cursor.position)
     })?;
     Ok((end.saturating_sub(limit), end))
 }
 
-fn encode_history_cursor(position: usize, revision_id: &str) -> String {
-    format!("h1:{position}:{revision_id}")
+fn encode_history_cursor(
+    binding: &HistoryCursorBinding,
+    position: usize,
+    revision_id: &str,
+) -> Result<String, ArtifactError> {
+    serde_json::to_vec(&HistoryCursor {
+        binding: HistoryCursorBinding {
+            version: binding.version,
+            context_digest: binding.context_digest.clone(),
+            library_version: binding.library_version,
+            artifact_id: binding.artifact_id.clone(),
+            owner_kind: binding.owner_kind,
+            owner_id: binding.owner_id.clone(),
+        },
+        position,
+        revision_id: revision_id.to_owned(),
+    })
+    .map(|bytes| URL_SAFE_NO_PAD.encode(bytes))
+    .map_err(|_| invalid_history_cursor())
 }
 
-fn decode_history_cursor(cursor: &str) -> Result<(usize, &str), ArtifactError> {
-    let mut parts = cursor.splitn(3, ':');
-    if parts.next() != Some("h1") {
+fn decode_history_cursor(
+    cursor: &str,
+    expected: &HistoryCursorBinding,
+) -> Result<HistoryCursor, ArtifactError> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(cursor)
+        .map_err(|_| invalid_history_cursor())?;
+    let cursor: HistoryCursor =
+        serde_json::from_slice(&bytes).map_err(|_| invalid_history_cursor())?;
+    if cursor.binding != *expected || cursor.revision_id.is_empty() {
         return Err(invalid_history_cursor());
     }
-    let position = parts
-        .next()
-        .and_then(|value| value.parse::<usize>().ok())
-        .ok_or_else(invalid_history_cursor)?;
-    let revision_id = parts.next().ok_or_else(invalid_history_cursor)?;
-    if revision_id.is_empty() {
-        return Err(invalid_history_cursor());
-    }
-    Ok((position, revision_id))
+    Ok(cursor)
 }
 
 fn invalid_history_cursor() -> ArtifactError {
     ArtifactError::InvalidField {
         field: "cursor",
-        reason: "cursor",
+        reason: "context_mismatch",
     }
 }
 
@@ -1758,7 +1983,7 @@ pub(crate) async fn commit_authorized_mutation<G: Send + Sync + 'static>(
     correlation_id: &SkillLibraryCorrelationId,
     store: Arc<ArtifactStore>,
     expected_library_version: u64,
-    idempotency: LibraryIdempotency,
+    mut idempotency: LibraryIdempotency,
     mutation: LibraryMutation,
     committed_at: LibraryTimestamp,
     prebuilt_candidate: Arc<G>,
@@ -1776,6 +2001,11 @@ pub(crate) async fn commit_authorized_mutation<G: Send + Sync + 'static>(
             )
             .await
             .map_err(SkillLibraryDispatchError::Authorization)?;
+            idempotency.request_digest = bind_idempotency_to_owner(
+                &idempotency.request_digest,
+                &decision.ownership,
+                project_id,
+            )?;
             let authorization = decision.authorization;
             let ownership = decision.ownership;
             let audit = decision.audit;
@@ -1906,6 +2136,34 @@ mod tests {
     }
 
     #[test]
+    fn list_cursor_is_opaque_and_bound_to_authority_query_and_generation() {
+        let binding = ListCursorBinding {
+            version: 1,
+            context_digest: "a".repeat(64),
+            library_version: 7,
+            query_digest: Some("b".repeat(64)),
+        };
+        let encoded = encode_list_cursor(&binding, "artifact-1".to_owned()).unwrap();
+        assert!(!encoded.contains("artifact-1"));
+        assert_eq!(
+            decode_list_cursor(&encoded, &binding).unwrap().artifact_id,
+            "artifact-1"
+        );
+
+        let stale = ListCursorBinding {
+            library_version: 8,
+            ..binding
+        };
+        assert!(matches!(
+            decode_list_cursor(&encoded, &stale),
+            Err(ArtifactError::InvalidField {
+                field: "cursor",
+                reason: "context_mismatch"
+            })
+        ));
+    }
+
+    #[test]
     fn artifact_search_matches_only_snapshot_indexed_metadata() {
         let root = tempfile::tempdir().unwrap();
         let store = ArtifactStore::new(root.path().join("artifacts")).unwrap();
@@ -1951,26 +2209,37 @@ mod tests {
         let revisions = (0..10_000)
             .map(|index| format!("rev-{index:05}"))
             .collect::<Vec<_>>();
+        let binding = HistoryCursorBinding {
+            version: 1,
+            context_digest: "authority-context".to_owned(),
+            library_version: 7,
+            artifact_id: "artifact-1".to_owned(),
+            owner_kind: labby_runtime::artifacts::LibraryOwnerKind::Team,
+            owner_id: "team-1".to_owned(),
+        };
 
-        let (start, end) = history_page_window(&revisions, None, 100).unwrap();
+        let (start, end) = history_page_window(&revisions, None, 100, &binding).unwrap();
         assert_eq!((start, end), (9_900, 10_000));
         assert_eq!(&revisions[end - 1], "rev-09999");
         assert_eq!(&revisions[start], "rev-09900");
 
-        let cursor = encode_history_cursor(start, &revisions[start]);
-        let (next_start, next_end) = history_page_window(&revisions, Some(&cursor), 100).unwrap();
+        let cursor = encode_history_cursor(&binding, start, &revisions[start]).unwrap();
+        let (next_start, next_end) =
+            history_page_window(&revisions, Some(&cursor), 100, &binding).unwrap();
         assert_eq!((next_start, next_end), (9_800, 9_900));
         assert_eq!(&revisions[next_end - 1], "rev-09899");
 
         assert!(matches!(
-            history_page_window(&revisions, Some("h1:9900:rev-09899"), 100),
+            history_page_window(&revisions, Some("h1:9900:rev-09899"), 100, &binding),
             Err(ArtifactError::InvalidField {
                 field: "cursor",
-                reason: "cursor"
+                reason: "context_mismatch"
             })
         ));
-        assert!(history_page_window(&revisions, Some("h1:999999:rev-09900"), 100).is_err());
-        assert!(history_page_window(&revisions, Some("rev-09900"), 100).is_err());
+        let mut other = binding;
+        other.owner_id = "team-2".to_owned();
+        assert!(history_page_window(&revisions, Some(&cursor), 100, &other).is_err());
+        assert!(history_page_window(&revisions, Some("rev-09900"), 100, &other).is_err());
     }
 
     struct OneStageFault(FaultStage);
@@ -2772,10 +3041,15 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert!(matches!(
-                inaccessible,
-                SkillLibraryDispatchError::Authorization(SkillLibraryAuthorizationError::Denied)
-            ));
+            assert!(
+                matches!(
+                    &inaccessible,
+                    SkillLibraryDispatchError::Authorization(
+                        SkillLibraryAuthorizationError::Denied
+                    )
+                ),
+                "{action}: {inaccessible:?}"
+            );
             assert!(matches!(
                 random,
                 SkillLibraryDispatchError::Authorization(SkillLibraryAuthorizationError::Denied)
@@ -2813,10 +3087,8 @@ mod tests {
             json!({"artifact_id": personal_id}),
             "jake-private-admin",
         )
-        .await
-        .unwrap();
-        assert_eq!(admin_view["owner"]["relationship"], "other");
-        assert_eq!(admin_view["can_mutate"], true);
+        .await;
+        assert!(admin_view.is_err());
 
         let replay = acceptance_dispatch(
             &service,

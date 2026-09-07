@@ -67,7 +67,8 @@ pub(super) fn validate(connection: &Connection) -> AccessStoreResult<()> {
     }
 
     validate_manifest(connection)?;
-    validate_bootstrap_state(connection, bootstrap_generation)
+    validate_bootstrap_state(connection, bootstrap_generation)?;
+    validate_team_authority(connection, bootstrap_generation)
 }
 
 pub(super) fn validate_v1_before_migration(connection: &Connection) -> AccessStoreResult<()> {
@@ -160,11 +161,86 @@ fn validate_manifest(connection: &Connection) -> AccessStoreResult<()> {
     canonical
         .execute_batch(super::migrations::DOMAIN_SCHEMA)
         .map_err(super::store::map_sqlite_error)?;
+    canonical
+        .execute_batch(super::migrations::TEAM_AUTHORITY_SCHEMA)
+        .map_err(super::store::map_sqlite_error)?;
+    canonical
+        .execute_batch(super::dev_container::DEV_CONTAINER_SCHEMA)
+        .map_err(super::store::map_sqlite_error)?;
     let expected = schema_manifest(&canonical)?;
     if actual != expected {
         return Err(integrity("schema_manifest"));
     }
     Ok(())
+}
+
+pub(super) fn validate_team_authority(
+    connection: &Connection,
+    generation: i64,
+) -> AccessStoreResult<()> {
+    let reserved: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM platform_administrators
+                            WHERE principal_id='bootstrap-owner')
+                 OR EXISTS(SELECT 1 FROM groups
+                           WHERE group_id='bootstrap-initial-team')
+                 OR EXISTS(SELECT 1 FROM team_memberships
+                           WHERE membership_id='bootstrap-initial-team-owner')
+                 OR EXISTS(SELECT 1 FROM access_audit
+                           WHERE event_id IN ('bootstrap-platform-admin-audit',
+                                              'bootstrap-initial-team-audit'))",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(super::store::map_sqlite_error)?;
+    if generation == 0 {
+        return if reserved {
+            Err(integrity("team_bootstrap_state"))
+        } else {
+            Ok(())
+        };
+    }
+    let canonical: bool = connection
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM platform_administrators
+                 WHERE principal_id='bootstrap-owner' AND status='active'
+                   AND authority_epoch=1 AND granted_by='bootstrap-owner')
+             AND EXISTS(
+                 SELECT 1 FROM groups
+                 WHERE group_id='bootstrap-initial-team'
+                   AND organization_id='bootstrap-local' AND kind='team'
+                   AND status='active' AND policy_epoch=1 AND membership_epoch=1
+                   AND created_by='bootstrap-owner')
+             AND EXISTS(
+                 SELECT 1 FROM team_memberships
+                 WHERE membership_id='bootstrap-initial-team-owner'
+                   AND organization_id='bootstrap-local'
+                   AND team_id='bootstrap-initial-team'
+                   AND principal_id='bootstrap-owner' AND role='owner'
+                   AND status='active' AND membership_epoch=1
+                   AND created_by='bootstrap-owner')
+             AND EXISTS(
+                 SELECT 1 FROM access_audit
+                 WHERE event_id='bootstrap-platform-admin-audit'
+                   AND actor_principal_id='bootstrap-owner'
+                   AND action='access.platform_admin.bootstrap'
+                   AND reason_code='canonical_bootstrap_principal')
+             AND EXISTS(
+                 SELECT 1 FROM access_audit
+                 WHERE event_id='bootstrap-initial-team-audit'
+                   AND actor_principal_id='bootstrap-owner'
+                   AND action='access.team.bootstrap'
+                   AND reason_code='canonical_bootstrap_principal')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(super::store::map_sqlite_error)?;
+    if canonical {
+        Ok(())
+    } else {
+        Err(integrity("team_bootstrap_state"))
+    }
 }
 
 fn map_metadata_error(error: rusqlite::Error) -> AccessStoreError {

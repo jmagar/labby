@@ -57,9 +57,7 @@ mod redirect;
 mod response;
 pub use entrypoints::{browser_login, register_client};
 use policy::validate_response_type;
-pub(crate) use policy::{
-    check_email_allowlist, elevate_scope_for_allowed_user, validate_resource, validate_scope,
-};
+pub(crate) use policy::{check_email_allowlist, validate_resource, validate_scope};
 pub(crate) use redirect::is_allowed_redirect_uri;
 #[cfg(test)]
 use redirect::{host_pattern_matches, wildcard_matches};
@@ -801,13 +799,11 @@ async fn finish_local_authorization(
     provider_binding: crate::types::ProviderBinding,
 ) -> Result<Response, AuthError> {
     let auth_code = random_token(24)?;
-    let elevated_scope =
-        elevate_scope_for_allowed_user(&request.scope, &state.config.default_scope);
     let redirect_uri_raw = request.redirect_uri.clone();
     let client_state = request.client_state.clone();
     let client_id = request.client_id.clone();
     let resource = request.resource.clone();
-    let scope = elevated_scope.clone();
+    let scope = request.scope.clone();
     state
         .store
         .insert_bound_auth_code(
@@ -817,7 +813,7 @@ async fn finish_local_authorization(
                 subject,
                 redirect_uri: request.redirect_uri.clone(),
                 resource: request.resource,
-                scope: elevated_scope,
+                scope: request.scope,
                 code_challenge: request.code_challenge,
                 code_challenge_method: request.code_challenge_method,
                 provider_refresh_token: None,
@@ -3038,9 +3034,8 @@ pub mod tests {
             super::validate_scope(&state, &canonical, "lab").unwrap(),
             "lab"
         );
-        // `:admin` is in `scopes_supported` by default — MCP clients can request
-        // it explicitly. (Allowed-emails users also receive it implicitly via
-        // elevate_scope_for_allowed_user at callback time.)
+        // OAuth scopes are a request ceiling. Requesting an advertised scope
+        // does not establish the caller's durable role or membership.
         assert_eq!(
             super::validate_scope(&state, &canonical, "lab:admin").unwrap(),
             "lab:admin"
@@ -3087,52 +3082,6 @@ pub mod tests {
             json["message"]
                 .as_str()
                 .is_some_and(|message| message.contains("does not match"))
-        );
-    }
-
-    #[test]
-    fn elevate_scope_adds_admin_when_missing() {
-        assert_eq!(
-            super::elevate_scope_for_allowed_user("lab", "lab"),
-            "lab lab:admin"
-        );
-        // Already has admin → no duplication.
-        assert_eq!(
-            super::elevate_scope_for_allowed_user("lab lab:admin", "lab"),
-            "lab lab:admin"
-        );
-        // Empty scope → just admin (rare; OAuth default normally fills `lab`).
-        assert_eq!(
-            super::elevate_scope_for_allowed_user("", "lab"),
-            "lab:admin"
-        );
-        // Different brand prefix (syslog, axon, etc.) uses its own default.
-        assert_eq!(
-            super::elevate_scope_for_allowed_user("syslog", "syslog"),
-            "syslog syslog:admin"
-        );
-        // default_scope with verb suffix (e.g. syslog:read) → admin uses base prefix only,
-        // not syslog:read:admin.
-        assert_eq!(
-            super::elevate_scope_for_allowed_user("syslog:read", "syslog:read"),
-            "syslog:read syslog:admin"
-        );
-        // Already has correct admin even when default_scope carries a suffix.
-        assert_eq!(
-            super::elevate_scope_for_allowed_user("syslog:read syslog:admin", "syslog:read"),
-            "syslog:read syslog:admin"
-        );
-        // Cross-brand: protected route token (mcp:read mcp:write) for a lab
-        // default_scope gets lab:admin injected so authenticate_protected_route_request
-        // can recognise the admin without re-reading the allowlist.
-        assert_eq!(
-            super::elevate_scope_for_allowed_user("mcp:read mcp:write", "lab"),
-            "mcp:read mcp:write lab:admin"
-        );
-        // Cross-brand already has admin → no duplication.
-        assert_eq!(
-            super::elevate_scope_for_allowed_user("mcp:read mcp:write lab:admin", "lab"),
-            "mcp:read mcp:write lab:admin"
         );
     }
 

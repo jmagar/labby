@@ -15,7 +15,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { depotCall, depotStatus, type DepotArtifact, type DepotStatus } from '@/lib/api/depot-client'
+import { type DepotArtifact, type DepotStatus } from '@/lib/api/depot-client'
+import { controlPlaneAction } from '@/lib/api/artifact-control-client'
 import { artifactDescription, artifactExportFilename, artifactId, artifactKind, artifactLabel, collectArtifactKinds, filterArtifacts, serializeArtifact } from './library-model'
 import { ARTIFACT_TYPES, ArtifactTypeMark, artifactTypeDefinition } from './artifact-type'
 
@@ -73,20 +74,19 @@ export function LibraryPageContent() {
   const load = useCallback(async (search: string, cursor?: string, signal?: AbortSignal) => {
     setState((current) => ({ ...current, loading: true, error: undefined, artifacts: cursor ? current.artifacts : [] }))
     try {
-      const [status, response] = await Promise.all([
-        depotStatus(signal),
-        depotCall<{ result?: { artifacts?: DepotArtifact[]; nextCursor?: string; total?: number } }>(
-          'depot.artifacts.list',
-          { limit: PAGE_SIZE, ...(search ? { query: search } : {}), ...(cursor ? { cursor } : {}) },
-          signal,
-        ),
-      ])
+      const response = await controlPlaneAction<{ artifacts?: DepotArtifact[]; nextCursor?: string; total?: number }>(
+        'artifacts',
+        'artifacts.list_remote',
+        { limit: PAGE_SIZE, ...(search ? { query: search } : {}), ...(cursor ? { cursor } : {}) },
+        signal,
+      )
+      const status: DepotStatus = { configured: true, enabled: true, mutationAuthority: false, maxResponseBytes: 1_048_576 }
       setState((current) => ({
-        artifacts: cursor ? [...current.artifacts, ...(response.result?.artifacts ?? [])] : (response.result?.artifacts ?? []),
-        cursor: response.result?.nextCursor,
+        artifacts: cursor ? [...current.artifacts, ...(response.artifacts ?? [])] : (response.artifacts ?? []),
+        cursor: response.nextCursor,
         loading: false,
         status,
-        total: response.result?.total,
+        total: response.total,
       }))
     } catch (error) {
       if (!signal?.aborted) setState((current) => ({ ...current, error: error instanceof Error ? error.message : String(error), loading: false }))
@@ -108,8 +108,8 @@ export function LibraryPageContent() {
     if (!selectedId) { setDetail(null); return }
     const controller = new AbortController()
     setDetailLoading(true)
-    void depotCall<{ result?: { artifact?: DepotArtifact } }>('depot.artifacts.get', { artifactId: selectedId }, controller.signal)
-      .then((response) => setDetail(response.result?.artifact ?? null))
+    void controlPlaneAction<{ artifact?: DepotArtifact }>('artifacts', 'artifacts.get_remote', { id: selectedId }, controller.signal)
+      .then((response) => setDetail(response.artifact ?? null))
       .catch((error) => { if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : String(error)) })
       .finally(() => { if (!controller.signal.aborted) setDetailLoading(false) })
     return () => controller.abort()

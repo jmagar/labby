@@ -367,5 +367,14 @@
     "description": "Override the Tailscale CLI executable used by proxy publication and preflight",
     "example": "tailscale",
     "default_port": null
+  },
+  {
+    "service": "setup",
+    "env_var": "LABBY_ACCESS_MIGRATION_EVIDENCE",
+    "required": false,
+    "secret": false,
+    "description": "Path to the source/checkpoint-bound approval evidence for an access-store schema migration",
+    "example": "/run/labby/access-migration-v7.json",
+    "default_port": null
   }
 ]

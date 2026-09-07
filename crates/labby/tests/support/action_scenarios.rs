@@ -71,6 +71,20 @@ impl ActionOutcome {
             && self.canary_free
     }
 
+    pub(crate) fn satisfies_surface(&self, intent: &CaseIntent, surface: Surface) -> bool {
+        let minimum = match surface {
+            Surface::Api => intent.api_minimum.unwrap_or(intent.minimum_evidence),
+            _ => intent.minimum_evidence,
+        };
+        self.key == intent.key()
+            && self.evidence >= minimum
+            && self.owner == intent.scenario_owner
+            && !self.outcome_kind.is_empty()
+            && !self.recovery.is_empty()
+            && !self.side_effects.is_empty()
+            && self.canary_free
+    }
+
     pub(crate) fn record(&self) {
         let Some(directory) = std::env::var_os("LABBY_E2E_CASE_DIR") else {
             return;
@@ -153,7 +167,10 @@ pub(crate) fn disposition(intent: &CaseIntent) -> Disposition {
 
 pub(crate) fn fixtures() -> BTreeMap<String, ServiceFixture> {
     let values = [
+        include_str!("../fixtures/e2e_actions/access.json"),
+        include_str!("../fixtures/e2e_actions/agents.json"),
         include_str!("../fixtures/e2e_actions/doctor.json"),
+        include_str!("../fixtures/e2e_actions/dev_containers.json"),
         include_str!("../fixtures/e2e_actions/browser.json"),
         include_str!("../fixtures/e2e_actions/fs.json"),
         include_str!("../fixtures/e2e_actions/gateway.json"),
@@ -162,6 +179,7 @@ pub(crate) fn fixtures() -> BTreeMap<String, ServiceFixture> {
         include_str!("../fixtures/e2e_actions/setup.json"),
         include_str!("../fixtures/e2e_actions/snippets.json"),
         include_str!("../fixtures/e2e_actions/stash.json"),
+        include_str!("../fixtures/e2e_actions/tasks.json"),
         include_str!("../fixtures/e2e_actions/artifacts.json"),
         include_str!("../fixtures/e2e_actions/sources.json"),
         include_str!("../fixtures/e2e_actions/jobs.json"),
@@ -261,6 +279,20 @@ pub(crate) async fn run_cli(home: &Path, args: &[&str]) -> Result<Output, String
         .map(|value| (*value).to_string())
         .collect::<Vec<_>>();
     run_cli_probe(home, &owned).await
+}
+
+pub(crate) async fn run_cli_against(
+    home: &Path,
+    args: &[&str],
+    guard: &crate::live_labby::LiveLabbyGuard,
+) -> Result<Output, String> {
+    let mut command = tokio::process::Command::from(isolated_command(home));
+    guard.authorize_cli(&mut command);
+    command.env("LABBY_MATRIX_CANARY", SECRET_CANARY).args(args);
+    tokio::time::timeout(CHILD_DEADLINE, command.output())
+        .await
+        .map_err(|_| format!("CLI child exceeded {CHILD_DEADLINE:?}"))?
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) async fn run_cli_in_install(
@@ -442,17 +474,6 @@ pub(crate) fn dedicated_contract_accepts_for(
     surface: Surface,
     error_kind: &str,
 ) -> bool {
-    // The isolated MCP runner can fail at either side of the same missing
-    // durable-principal boundary: the Linux peer can be denied before
-    // resolution, Depot can be unreachable, or Stash can map the unavailable
-    // authority. These are stable errors; the authenticated restart journey
-    // supplies the success evidence.
-    if key.starts_with("stash:") && surface == Surface::Mcp {
-        return matches!(
-            error_kind,
-            "forbidden" | "upstream_connect_error" | "service_unavailable"
-        );
-    }
     dedicated_contract_for(key, surface)
         .is_some_and(|(_, expected_kind)| error_kind == expected_kind)
 }
@@ -578,26 +599,7 @@ fn dedicated_contract_for(key: &str, surface: Surface) -> Option<(&'static str, 
 
 #[cfg(test)]
 mod dedicated_contract_tests {
-    use super::{
-        Surface, dedicated_contract, dedicated_contract_accepts, dedicated_contract_accepts_for,
-        dedicated_contract_reason,
-    };
-
-    #[test]
-    fn stash_mcp_accepts_both_missing_authority_layers() {
-        for kind in ["forbidden", "upstream_connect_error", "service_unavailable"] {
-            assert!(dedicated_contract_accepts_for(
-                "stash:stash.list",
-                Surface::Mcp,
-                kind
-            ));
-        }
-        assert!(!dedicated_contract_accepts_for(
-            "stash:stash.list",
-            Surface::Mcp,
-            "internal_error"
-        ));
-    }
+    use super::{dedicated_contract, dedicated_contract_accepts, dedicated_contract_reason};
 
     #[test]
     fn every_dedicated_contract_accepts_only_its_exact_error_kind() {

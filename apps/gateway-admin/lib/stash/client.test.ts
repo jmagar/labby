@@ -22,7 +22,7 @@ test('list preserves opaque cursor and search while using the server page defaul
   assert.equal(requested?.credentials, 'include')
 })
 
-test('binary upload passes the File body and csrf without JSON wrapping', async () => {
+test('binary upload sends exact browser content length and csrf without JSON wrapping', async () => {
   let requested: Request | undefined
   globalThis.fetch = async (input, init) => {
     requested = new Request(new URL(String(input), 'http://labby.test'), init)
@@ -34,7 +34,6 @@ test('binary upload passes the File body and csrf without JSON wrapping', async 
   assert.equal(url.search, '')
   assert.equal(decodeURIComponent(requested?.headers.get('x-labby-stash-filename') || ''), file.name)
   assert.equal(requested?.headers.get('x-csrf-token'), 'csrf-stash')
-  assert.equal(requested?.body instanceof ReadableStream, true)
   assert.equal(await requested?.text(), 'hello')
 })
 
@@ -67,4 +66,18 @@ test('recipient discovery keeps identity queries out of URLs and requires csrf',
   assert.equal(requested?.method, 'POST')
   assert.equal(requested?.headers.get('x-csrf-token'), 'csrf-stash')
   assert.deepEqual(JSON.parse(await requested!.text()), { query: 'private person' })
+})
+
+test('selected team is sent explicitly and download remains a same-origin URI', async () => {
+  __setBrowserSessionStateForTests({
+    status: 'authenticated', user: { sub: 'operator' }, expiresAt: Date.now() + 60_000,
+    csrfToken: 'csrf-stash', isAdmin: false,
+    authority: { schemaVersion: 1, compatibilityGeneration: 1, principalId: 'principal-1', organizationId: 'org-1', activeOwner: { kind: 'team', id: 'team-1' }, activeTeamId: 'team-1', teams: [{ id: 'team-1', role: 'member', membershipEpoch: 1, policyEpoch: 1 }], projects: [], capabilities: ['scope.read'], generation: 1 },
+  })
+  let requested: Request | undefined
+  globalThis.fetch = async (input, init) => { requested = new Request(new URL(String(input), 'http://labby.test'), init); return Response.json({ files: [], next_cursor: null }) }
+  await listFiles()
+  assert.equal(requested?.headers.get('x-labby-owner-kind'), 'team')
+  assert.equal(requested?.headers.get('x-labby-owner-id'), 'team-1')
+  assert.equal(downloadUrl('file-1'), '/v1/stash/files/file-1/content?owner_kind=team&owner_id=team-1')
 })

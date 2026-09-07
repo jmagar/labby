@@ -798,7 +798,7 @@ impl LabMcpServer {
         let mut resources = CatalogSnapshotCollector::new(page_collector);
         let mut regular_resource_provenance = Vec::new();
 
-        for resource in self.file_stash_resources(&context).await? {
+        for resource in self.file_stash_resources(&context).await {
             resources.accept(resource);
             if resources.finished() {
                 break;
@@ -812,7 +812,6 @@ impl LabMcpServer {
                     .with_mime_type("application/json"),
             );
         }
-
         // Error-contract schemas: always listed so agents can discover the
         // envelope contract in-band instead of relying on out-of-band docs.
         #[cfg(feature = "skills")]
@@ -1005,8 +1004,9 @@ impl LabMcpServer {
                 }
             }
             if !resources.finished()
-                && let Some(oauth_subject) =
-                    oauth_upstream_subject_for_request(auth, self.request_subject(&context))
+                && let Some(oauth_subject) = self.route_oauth_subject(
+                    oauth_upstream_subject_for_request(auth, self.request_subject(&context)),
+                )
             {
                 let configs = self.route_scoped_oauth_upstream_configs().await;
                 let mut scoped_resources = pool
@@ -1748,13 +1748,15 @@ impl LabMcpServer {
         #[cfg(feature = "gateway")]
         let auth = auth_context_from_extensions(&context.extensions);
         #[cfg(feature = "gateway")]
-        if let Some(oauth_subject) =
-            oauth_upstream_subject_for_request(auth, self.request_subject(&context))
-            && let Some(pool) = self.current_upstream_pool().await
+        if let Some(oauth_subject) = self.route_oauth_subject(oauth_upstream_subject_for_request(
+            auth,
+            self.request_subject(&context),
+        )) && let Some(pool) = self.current_upstream_pool().await
             && let Some(upstream_name) = uri
                 .strip_prefix("lab://upstream/")
                 .and_then(|rest| rest.split('/').next())
             && self.route_scope.allows_upstream(upstream_name)
+            && self.route_team_credential_valid(upstream_name).await
             && let Some(config) = self.oauth_upstream_config(upstream_name).await
         {
             return self

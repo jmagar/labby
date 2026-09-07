@@ -24,6 +24,21 @@ fn fresh_depot_is_public_and_explicit_disable_survives_roundtrip() {
 }
 
 #[test]
+fn managed_mode_never_silently_authorizes_stale_or_unknown_protocol() {
+    use super::depot::DepotControlMode;
+    let mut config = LabConfig::default();
+    assert_eq!(config.depot.control_mode, DepotControlMode::Standalone);
+    assert!(!config.depot.managed_mutations_ready(true, 1));
+
+    config.depot.control_mode = DepotControlMode::LabbyManaged;
+    assert!(config.depot.managed_mutations_ready(true, 1));
+    assert!(!config.depot.managed_mutations_ready(false, 1));
+    assert!(!config.depot.managed_mutations_ready(true, 2));
+    config.depot.managed_authority_kill_switch = true;
+    assert!(!config.depot.managed_mutations_ready(true, 1));
+}
+
+#[test]
 fn invalid_provider_is_quarantined_without_losing_healthy_sibling() {
     let config: LabConfig = toml::from_str(
         r#"

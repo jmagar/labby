@@ -1,3 +1,9 @@
+import { invalidateAuthorityRequests } from './authority-context.ts'
+import { MalformedAuthorityResponseError, parseAuthoritySnapshot, selectAuthorityWorkspace, type AuthorityOwner, type AuthoritySnapshot } from './authority.ts'
+
+export type SessionAuthority = AuthoritySnapshot
+export type { AuthorityOwner, AuthoritySnapshot }
+
 export type BrowserSessionState =
   | { status: 'loading' }
   | {
@@ -8,6 +14,8 @@ export type BrowserSessionState =
       }
       expiresAt: number
       csrfToken: string
+      authority?: SessionAuthority
+      /** Compatibility presentation flag derived only from server-projected capabilities. */
       isAdmin?: boolean
       projectId?: string
     }
@@ -28,8 +36,18 @@ type SessionPayload =
       }
       expires_at: number
       csrf_token: string
-      is_admin: boolean
       project_id?: string | null
+      principal_id?: string | null
+      active_owner?: { kind?: string; id?: string } | null
+      active_team_id?: string | null
+      active_project_id?: string | null
+      capabilities?: unknown
+      authority_generation?: number | null
+      owner?: unknown
+      organization_id?: unknown
+      teams?: unknown
+      projects?: unknown
+      project?: unknown
     }
   | {
       authenticated: false
@@ -41,6 +59,7 @@ type SessionErrorPayload = {
 }
 
 let currentState: BrowserSessionState = { status: 'loading' }
+export const AUTHORITY_WORKSPACE_CHANGED_EVENT = 'labby:authority-workspace-changed'
 let sessionGeneration = 0
 const listeners = new Set<() => void>()
 
@@ -53,28 +72,49 @@ function emit() {
 function setState(next: BrowserSessionState) {
   const previousIdentity = sessionIdentity(currentState)
   const nextIdentity = sessionIdentity(next)
-  if (previousIdentity !== nextIdentity) sessionGeneration += 1
+  if (previousIdentity !== nextIdentity) {
+    sessionGeneration += 1
+    invalidateAuthorityRequests(sessionGeneration)
+  }
   currentState = next
   emit()
 }
 
 function sessionIdentity(state: BrowserSessionState) {
-  return state.status === 'authenticated'
-    ? `authenticated:${state.user.sub}:${state.isAdmin ? 'admin' : 'user'}:${state.projectId ?? 'unbound'}:${state.csrfToken}:${state.expiresAt}`
-    : state.status
+  if (state.status !== 'authenticated') return state.status
+  const authority = state.authority
+  const authorityIdentity = authority
+    ? [
+        authority.principalId,
+        authority.activeOwner.kind,
+        authority.activeOwner.id,
+        authority.activeTeamId ?? '',
+        authority.activeProjectId ?? '',
+        [...authority.capabilities].sort().join(','),
+        authority.generation,
+      ].join(':')
+    : 'authority-unavailable'
+  return `authenticated:${state.user.sub}:${authorityIdentity}:${state.csrfToken}:${state.expiresAt}`
+}
+
+function normalizeAuthority(payload: Extract<SessionPayload, { authenticated: true }>): SessionAuthority | undefined {
+  const hasProjection = payload.authority_generation !== undefined || payload.organization_id !== undefined || payload.owner !== undefined || payload.active_owner !== undefined
+  return hasProjection ? parseAuthoritySnapshot(payload as unknown as Record<string, unknown>) : undefined
 }
 
 function normalizePayload(payload: SessionPayload): BrowserSessionState {
   if (!payload.authenticated) {
     return { status: 'unauthenticated' }
   }
+  const authority = normalizeAuthority(payload)
   return {
     status: 'authenticated',
     user: payload.user,
     expiresAt: payload.expires_at,
     csrfToken: payload.csrf_token,
-    isAdmin: payload.is_admin ?? false,
-    projectId: payload.project_id ?? undefined,
+    authority,
+    isAdmin: authority?.capabilities.includes('platform.manage') ?? false,
+    projectId: authority?.activeProjectId,
   }
 }
 
@@ -95,6 +135,22 @@ export function getSessionCsrfToken() {
 
 export function getSessionProjectId() {
   return currentState.status === 'authenticated' ? currentState.projectId : undefined
+}
+
+export function getSessionAuthority() {
+  return currentState.status === 'authenticated' ? currentState.authority : undefined
+}
+
+export function sessionHasCapability(capability: string) {
+  return getSessionAuthority()?.capabilities.includes(capability) ?? false
+}
+
+export function selectSessionWorkspace(selection: { teamId?: string | null; projectId?: string | null }) {
+  if (currentState.status !== 'authenticated' || !currentState.authority) throw new Error('Authority is unavailable')
+  const authority = selectAuthorityWorkspace(currentState.authority, selection)
+  setState({ ...currentState, authority, projectId: authority.activeProjectId })
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(AUTHORITY_WORKSPACE_CHANGED_EVENT))
+  return authority
 }
 
 /** Authority-adjacent cache generation. Never expose the subject in cache keys. */
@@ -126,11 +182,15 @@ export async function loadBrowserSession() {
         requestId: response.headers.get('x-request-id') ?? undefined,
       }
     }
-  } catch {
+  } catch (error) {
+    if (error instanceof MalformedAuthorityResponseError) {
+      next = { status: 'auth_error', kind: 'incompatible_authority', message: error.message }
+    } else {
     next = {
       status: 'auth_error',
       kind: 'network_error',
       message: SESSION_ERROR_MESSAGE,
+    }
     }
   }
 

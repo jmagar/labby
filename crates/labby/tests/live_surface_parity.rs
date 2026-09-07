@@ -46,9 +46,12 @@ fn every_current_multi_surface_service_has_a_parity_partition() {
             multi,
             BTreeSet::from([
                 "artifacts",
+                "access",
+                "agents",
                 "browser",
                 "bundles",
                 "doctor",
+                "dev_containers",
                 "fs",
                 "gateway",
                 "jobs",
@@ -57,6 +60,7 @@ fn every_current_multi_surface_service_has_a_parity_partition() {
                 "snippets",
                 "sources",
                 "stash",
+                "tasks",
                 "uploads"
             ])
         );

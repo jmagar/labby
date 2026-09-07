@@ -7,6 +7,7 @@ use axum::{
     response::IntoResponse,
     routing::post,
 };
+use labby_auth::VerifiedIdentity;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -242,6 +243,9 @@ fn gateway_action_requires_admin(action: &str) -> bool {
     if bare == "help" || bare == "schema" {
         return false;
     }
+    if !crate::access::gateway_transport_requires_admin(action) {
+        return false;
+    }
     crate::dispatch::gateway::ACTIONS
         .iter()
         .find(|spec| spec.name == action)
@@ -298,10 +302,40 @@ async fn handle(
     peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     auth: Option<Extension<AuthContext>>,
+    identity: Option<Extension<VerifiedIdentity>>,
     Json(req): Json<ActionRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let request_id = headers.get("x-request-id").and_then(|v| v.to_str().ok());
     require_gateway_admin(&req.action, request_id, auth.as_ref())?;
+    let auth_context = auth.as_ref().ok_or_else(|| {
+        ApiError::from(ToolError::Forbidden {
+            message: "Gateway operation is not authorized".into(),
+            required_scopes: Vec::new(),
+        })
+    })?;
+    let identity = identity
+        .ok_or_else(|| {
+            ApiError::from(ToolError::Forbidden {
+                message: "Gateway operation is not authorized".into(),
+                required_scopes: Vec::new(),
+            })
+        })?
+        .0;
+    let installation_id = state.installation_id.as_deref().unwrap_or("installation");
+    let team_id = headers
+        .get("x-labby-team-id")
+        .and_then(|value| value.to_str().ok());
+    crate::access::authorize_gateway_action(
+        &state.access_runtime,
+        identity,
+        &auth_context.0,
+        installation_id,
+        team_id,
+        &req.action,
+    )
+    .await
+    .map_err(ApiError::from)?;
+    let team_id = team_id.map(str::to_owned);
     let subject = auth.as_ref().map(|value| value.0.sub.clone());
     let auth_for_dispatch = auth.clone();
     let manager = state
@@ -327,12 +361,22 @@ async fn handle(
             let subject = subject.clone();
             let auth = auth_for_dispatch.clone();
             async move {
+                let params = crate::access::qualify_team_gateway_params(
+                    &action,
+                    team_id.as_deref(),
+                    params,
+                )?;
                 let params = inject_gateway_owner(&action, params, subject.as_deref(), request_id);
                 // Unlike trusted stdio MCP, an unauthenticated HTTP request
                 // must never inherit the shared gateway OAuth credential.
                 let oauth_subject =
                     http_oauth_subject(auth.as_ref().map(|value| &value.0), subject.as_deref());
-                crate::dispatch::gateway::dispatch_with_manager_scoped(
+                let oauth_subject = crate::access::gateway_runtime_subject(
+                    &action,
+                    team_id.as_deref(),
+                    oauth_subject.as_deref(),
+                );
+                let mut response = crate::dispatch::gateway::dispatch_with_manager_scoped(
                     &manager,
                     &action,
                     params,
@@ -341,7 +385,9 @@ async fn handle(
                         oauth_subject,
                     },
                 )
-                .await
+                .await?;
+                crate::access::filter_team_gateway_projection(team_id.as_deref(), &mut response);
+                Ok(response)
             }
         },
     )
@@ -392,7 +438,7 @@ mod tests {
     use serde_json::json;
     use tower::ServiceExt;
 
-    use super::{http_oauth_subject, inject_gateway_owner};
+    use super::{gateway_action_requires_admin, http_oauth_subject, inject_gateway_owner};
 
     use crate::api::oauth::AuthContext;
     use crate::api::{
@@ -436,19 +482,50 @@ mod tests {
     /// which set `needs_auth=false` and, before the fix, mounted gateway routes without
     /// any authentication gate.  Now gateway routes are only mounted when auth IS
     /// configured.  Tests that exercise gateway actions must use an authenticated app.
-    fn test_app_with_manager(manager: Arc<GatewayManager>) -> Router {
-        let state = AppState::from_registry(build_default_registry()).with_gateway_manager(manager);
+    async fn authorized_test_state(manager: Arc<GatewayManager>) -> AppState {
+        let directory = tempfile::Builder::new()
+            .prefix("labby-gateway-access-test-")
+            .tempdir_in(std::env::current_dir().expect("test working directory"))
+            .expect("access tempdir");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+                .expect("secure access tempdir");
+        }
+        let directory = directory.keep();
+        let runtime =
+            Arc::new(crate::access::AccessRuntime::initialize(directory.join("access.db")).await);
+        let identity = labby_auth::VerifiedIdentity::local_credential(
+            labby_auth::Authenticator::StaticBearer,
+            "static-bearer:primary",
+        )
+        .expect("static bearer identity");
+        runtime
+            .bootstrap_owner(
+                crate::access::BootstrapOwnerInput::new(identity, "Local", "Default")
+                    .expect("bootstrap input"),
+            )
+            .await
+            .expect("bootstrap access authority");
+        AppState::from_registry(build_default_registry())
+            .with_gateway_manager(manager)
+            .with_access_runtime(runtime)
+    }
+
+    async fn test_app_with_manager(manager: Arc<GatewayManager>) -> Router {
+        let state = authorized_test_state(manager).await;
         // Use a static bearer token so needs_auth=true and /v1/gateway is mounted.
         build_router_with_bearer(state, Some("test-token".into()), None)
     }
 
-    fn test_app() -> Router {
-        test_app_with_manager(test_manager())
+    async fn test_app() -> Router {
+        test_app_with_manager(test_manager()).await
     }
 
     /// App with bearer auth + an injected AuthContext (for scope-gated tests).
-    fn test_app_with_auth_context(manager: Arc<GatewayManager>, auth: AuthContext) -> Router {
-        test_app_with_manager(manager).layer(Extension(auth))
+    async fn test_app_with_auth_context(manager: Arc<GatewayManager>, auth: AuthContext) -> Router {
+        test_app_with_manager(manager).await.layer(Extension(auth))
     }
 
     /// Mount ONLY the gateway route group with a layered `AuthContext` and no
@@ -458,11 +535,20 @@ mod tests {
     /// cannot model a non-admin caller. Mounting `services::gateway::routes`
     /// directly (mirroring `upstream_oauth_routes_require_admin_scope`) lets the
     /// layered read-only context survive to the handler's scope gate.
-    fn gateway_routes_with_auth_context(manager: Arc<GatewayManager>, auth: AuthContext) -> Router {
-        let state = AppState::from_registry(build_default_registry()).with_gateway_manager(manager);
+    async fn gateway_routes_with_auth_context(
+        manager: Arc<GatewayManager>,
+        auth: AuthContext,
+    ) -> Router {
+        let state = authorized_test_state(manager).await;
+        let identity = labby_auth::VerifiedIdentity::local_credential(
+            labby_auth::Authenticator::StaticBearer,
+            "static-bearer:primary",
+        )
+        .expect("static bearer identity");
         super::routes(state.clone())
             .router
             .layer(Extension(auth))
+            .layer(Extension(identity))
             .with_state(state)
     }
 
@@ -590,7 +676,7 @@ mod tests {
         manager: Arc<GatewayManager>,
         body: serde_json::Value,
     ) -> axum::response::Response {
-        let app = test_app_with_auth_context(manager, admin_auth_context());
+        let app = test_app_with_auth_context(manager, admin_auth_context()).await;
         post_gateway(app, body).await
     }
 
@@ -616,7 +702,7 @@ mod tests {
     async fn gateway_admin_actions_refused_when_no_auth_context_present() {
         // App has bearer auth configured (gateway IS mounted), but the request
         // carries no Authorization header → no AuthContext in extensions.
-        let app = test_app();
+        let app = test_app().await;
 
         for action in [
             "gateway.list",
@@ -699,10 +785,15 @@ mod tests {
 
     #[tokio::test]
     async fn trusted_outer_auth_mounts_gateway_without_bearer_middleware() {
-        let state =
-            AppState::from_registry(build_default_registry()).with_gateway_manager(test_manager());
+        let state = authorized_test_state(test_manager()).await;
+        let identity = labby_auth::VerifiedIdentity::local_credential(
+            labby_auth::Authenticator::StaticBearer,
+            "static-bearer:primary",
+        )
+        .expect("static bearer identity");
         let app = build_router_with_external_auth(state, None, None, None, &[], true)
-            .layer(Extension(admin_auth_context()));
+            .layer(Extension(admin_auth_context()))
+            .layer(Extension(identity));
 
         let response = app
             .oneshot(
@@ -739,7 +830,7 @@ mod tests {
         );
 
         let manager = test_manager();
-        let app = gateway_routes_with_auth_context(manager, read_only_auth_context());
+        let app = gateway_routes_with_auth_context(manager, read_only_auth_context()).await;
 
         for action in admin_actions {
             let response = post_gateway_routes(
@@ -775,7 +866,7 @@ mod tests {
             )
             .with_resource_registry(registry),
         );
-        let app = gateway_routes_with_auth_context(manager, admin_auth_context());
+        let app = gateway_routes_with_auth_context(manager, admin_auth_context()).await;
         let response = post_gateway_routes(
             app,
             json!({
@@ -901,7 +992,7 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_sensitive_actions_require_admin_when_authenticated() {
-        let app = gateway_routes_with_auth_context(test_manager(), read_only_auth_context());
+        let app = gateway_routes_with_auth_context(test_manager(), read_only_auth_context()).await;
 
         for action in [
             "gateway.list",
@@ -989,7 +1080,7 @@ mod tests {
             },
         )
         .expect("write config");
-        let app = test_app_with_auth_context(manager.clone(), admin_auth_context());
+        let app = test_app_with_auth_context(manager.clone(), admin_auth_context()).await;
 
         let reloaded = post_gateway(
             app.clone(),
@@ -1038,7 +1129,7 @@ mod tests {
     #[tokio::test]
     async fn gateway_add_update_remove_reload_routes_exist() {
         let manager = test_manager();
-        let app = test_app_with_auth_context(manager, admin_auth_context());
+        let app = test_app_with_auth_context(manager, admin_auth_context()).await;
 
         let added = post_gateway(app.clone(), json!({
             "action":"gateway.add",
@@ -1120,7 +1211,7 @@ mod tests {
     #[tokio::test]
     async fn gateway_routes_do_not_require_destructive_confirm_under_data_loss_definition() {
         let manager = test_manager();
-        let app = test_app_with_auth_context(manager, admin_auth_context());
+        let app = test_app_with_auth_context(manager, admin_auth_context()).await;
         let response = post_gateway(
             app,
             json!({
@@ -1134,7 +1225,7 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_actions_endpoint_is_registered() {
-        let response = get_gateway_actions(test_app()).await;
+        let response = get_gateway_actions(test_app().await).await;
         assert_eq!(response.status(), StatusCode::OK);
     }
 
@@ -1157,12 +1248,12 @@ mod tests {
 
     #[tokio::test]
     async fn api_admin_tool_browser_requires_exact_admin_scope() {
-        let read = gateway_routes_with_auth_context(test_manager(), read_only_auth_context());
+        let read = gateway_routes_with_auth_context(test_manager(), read_only_auth_context()).await;
         let response =
             post_tool_browser(read, "/codemode/tools/search", json!({"query":"issues"})).await;
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
-        let admin = gateway_routes_with_auth_context(test_manager(), admin_auth_context());
+        let admin = gateway_routes_with_auth_context(test_manager(), admin_auth_context()).await;
         let response =
             post_tool_browser(admin, "/codemode/tools/search", json!({"query":"issues"})).await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -1174,7 +1265,7 @@ mod tests {
 
     #[tokio::test]
     async fn api_admin_tool_browser_rejects_authority_injection() {
-        let admin = gateway_routes_with_auth_context(test_manager(), admin_auth_context());
+        let admin = gateway_routes_with_auth_context(test_manager(), admin_auth_context()).await;
         let response = post_tool_browser(
             admin,
             "/codemode/tools/search",
@@ -1186,7 +1277,7 @@ mod tests {
 
     #[tokio::test]
     async fn api_admin_tool_describe_enforces_auth_validation_and_neutral_not_found() {
-        let read = gateway_routes_with_auth_context(test_manager(), read_only_auth_context());
+        let read = gateway_routes_with_auth_context(test_manager(), read_only_auth_context()).await;
         let forbidden = post_tool_browser(
             read,
             "/codemode/tools/describe",
@@ -1195,7 +1286,7 @@ mod tests {
         .await;
         assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
 
-        let admin = gateway_routes_with_auth_context(test_manager(), admin_auth_context());
+        let admin = gateway_routes_with_auth_context(test_manager(), admin_auth_context()).await;
         let oversized = post_tool_browser(
             admin.clone(),
             "/codemode/tools/describe",
@@ -1227,5 +1318,17 @@ mod tests {
         })
         .into_response();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn team_policy_actions_reach_domain_authorization_without_admin_scope() {
+        assert!(!gateway_action_requires_admin("gateway.loadout.list"));
+        assert!(!gateway_action_requires_admin("gateway.loadout.add"));
+        assert!(!gateway_action_requires_admin(
+            "gateway.protected_route.remove"
+        ));
+        assert!(gateway_action_requires_admin("gateway.add"));
+        assert!(gateway_action_requires_admin("gateway.oauth.clear"));
+        assert!(gateway_action_requires_admin("gateway.unknown"));
     }
 }

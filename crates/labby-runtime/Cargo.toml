@@ -13,6 +13,7 @@ categories = ["development-tools"]
 publish = false
 
 [dependencies]
+labby-primitives = { path = "../labby-primitives" }
 url.workspace = true
 serde.workspace = true
 serde_json.workspace = true

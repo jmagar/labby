@@ -1,4 +1,4 @@
-import { getSessionCsrfToken } from '@/lib/auth/session-store'
+import { getSessionAuthority, getSessionCsrfToken } from '@/lib/auth/session-store'
 import type { GrantPage, StashFile, StashGrant, StashPage, StashStats } from './types'
 
 export class StashError extends Error {
@@ -25,7 +25,11 @@ function csrfHeaders(json = false): Headers {
 }
 
 function request(path: string, init: RequestInit = {}) {
-  return fetch(`/v1/stash${path}`, { credentials: 'include', cache: 'no-store', ...init })
+  const headers = new Headers(init.headers)
+  const authority = getSessionAuthority()
+  const owner = authority?.activeOwner.kind === 'team' ? authority.activeOwner : authority?.activeOwner.kind === 'project' && authority.activeTeamId ? { kind: 'team' as const, id: authority.activeTeamId } : authority ? { kind: 'personal' as const, id: authority.principalId } : undefined
+  if (owner) { headers.set('x-labby-owner-kind', owner.kind); headers.set('x-labby-owner-id', owner.id) }
+  return fetch(`/v1/stash${path}`, { credentials: 'include', cache: 'no-store', ...init, headers })
 }
 
 export async function listFiles(cursor?: string, signal?: AbortSignal, search?: string): Promise<StashPage> {
@@ -53,7 +57,12 @@ export async function uploadFile(file: File, signal?: AbortSignal): Promise<{ fi
 }
 
 export function downloadUrl(fileId: string): string {
-  return `/v1/stash/files/${encodeURIComponent(fileId)}/content`
+  const authority = getSessionAuthority()
+  const owner = authority?.activeOwner.kind === 'team' ? authority.activeOwner : authority?.activeOwner.kind === 'project' && authority.activeTeamId ? { kind: 'team' as const, id: authority.activeTeamId } : authority ? { kind: 'personal' as const, id: authority.principalId } : undefined
+  const query = new URLSearchParams()
+  if (owner) { query.set('owner_kind', owner.kind); query.set('owner_id', owner.id) }
+  const suffix = query.size ? `?${query}` : ''
+  return `/v1/stash/files/${encodeURIComponent(fileId)}/content${suffix}`
 }
 
 export async function renameFile(fileId: string, displayName: string): Promise<StashFile> {

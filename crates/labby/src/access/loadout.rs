@@ -362,7 +362,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             store.loadout_state_for_test().await.unwrap(),
-            (1, 2, 1, 1, 2)
+            (1, 2, 1, 1, 4)
         );
         let audit = store.loadout_audit_for_test().await.unwrap();
         assert_eq!(audit.0, "access.project_loadout.assign");
@@ -437,7 +437,7 @@ mod tests {
         );
         assert_eq!(
             first.loadout_state_for_test().await.unwrap(),
-            (1, 2, 1, 1, 2)
+            (1, 2, 1, 1, 4)
         );
     }
 }

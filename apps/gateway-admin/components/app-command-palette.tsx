@@ -96,6 +96,8 @@ import {
 } from '@/lib/api/service-action-client'
 import type { CreateGatewayInput, Gateway } from '@/lib/types/gateway'
 import { OPEN_COMMAND_PALETTE_EVENT } from '@/lib/command-palette-events'
+import { capabilityForPath } from '@/components/console/nav-model'
+import { AUTHORITY_WORKSPACE_CHANGED_EVENT, useBrowserSession } from '@/lib/auth/session'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -220,11 +222,6 @@ function parseInstanceLabels(description: string): string[] {
     .filter((s) => s.length > 0 && s.length <= 64)
 }
 
-/** Static palette items narrowed to one kind — used by the `>` / `/` scopes. */
-function appCommandItemsOfKind(kind: AppCommandItem['kind']): AppCommandItem[] {
-  return appCommandItems.filter((item) => item.kind === kind)
-}
-
 function matchesQuery(query: string, ...fields: string[]): boolean {
   if (!query) return true
   const q = query.toLowerCase()
@@ -274,6 +271,30 @@ export function AppCommandPalette() {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [isCopied, markCopied] = useCopyTimeout(1500)
   const abortRef = useRef<AbortController | null>(null)
+  const session = useBrowserSession()
+  const capabilities = useMemo(
+    () => session.status === 'authenticated' ? session.authority?.capabilities ?? [] : [],
+    [session],
+  )
+  const allowedCommands = useMemo(() => appCommandItems.filter((item) => {
+    if (!item.href) return capabilities.includes('scope.operate')
+    const required = capabilityForPath(item.href)
+    return required === null || (required !== undefined && capabilities.includes(required))
+  }), [capabilities])
+
+  useEffect(() => {
+    const clearSensitiveState = () => {
+      abortRef.current?.abort()
+      abortRef.current = null
+      setOpen(false)
+      setQuery('')
+      setPages([])
+      dispatch({ type: 'BROWSE' })
+      setPendingGatewayId(null)
+    }
+    window.addEventListener(AUTHORITY_WORKSPACE_CHANGED_EVENT, clearSensitiveState)
+    return () => window.removeEventListener(AUTHORITY_WORKSPACE_CHANGED_EVENT, clearSensitiveState)
+  }, [])
 
   // Issue 4: destructure error so we can surface catalog fetch failures
   const { data: catalogServices, isLoading: catalogLoading, error: catalogError } = useCommandCatalog()
@@ -282,7 +303,9 @@ export function AppCommandPalette() {
   // mounted by the admin layout on every page, so fetching on mount undid the
   // deliberate gating the Loadouts page added and made each navigation spawn
   // the fleet. Fetch when the operator actually opens the palette.
-  const { data: gateways = [], isLoading: gatewaysLoading } = useGateways(open)
+  const canManageGateways = capabilities.includes('scope.manage') || capabilities.includes('platform.manage')
+  const canOperate = capabilities.includes('scope.operate')
+  const { data: gateways = [], isLoading: gatewaysLoading } = useGateways(open && canManageGateways)
   const { createGateway, testGateway, reloadGateway, enableGateway, disableGateway } =
     useGatewayMutations()
 
@@ -291,14 +314,14 @@ export function AppCommandPalette() {
 
   const scopedCommandItems = useMemo(() => {
     if (scope === null) return undefined
-    if (scope === 'actions') return appCommandItemsOfKind('action')
-    if (scope === 'pages') return appCommandItemsOfKind('destination')
+    if (scope === 'actions') return allowedCommands.filter((item) => item.kind === 'action')
+    if (scope === 'pages') return allowedCommands.filter((item) => item.kind === 'destination')
     return []
-  }, [scope])
+  }, [allowedCommands, scope])
 
   const state = useMemo(
-    () => buildAppCommandState(scopedQuery, scopedCommandItems),
-    [scopedQuery, scopedCommandItems],
+    () => buildAppCommandState(scopedQuery, scopedCommandItems ?? allowedCommands),
+    [allowedCommands, scopedQuery, scopedCommandItems],
   )
   const [activeItemId, setActiveItemId] = useState<string | null>(state.activeItemId)
 
@@ -307,6 +330,7 @@ export function AppCommandPalette() {
 
   // Catalog items for the current page
   const catalogItems = useMemo<CatalogBrowseItem[]>(() => {
+    if (!canOperate) return []
     if (currentPage === '') {
       if (!paletteScopeShows(scope, 'actions')) return []
       return buildCatalogServiceItems(catalogServices)
@@ -314,7 +338,7 @@ export function AppCommandPalette() {
     const svc = catalogServices.find((s) => s.name === currentPage)
     if (!svc) return []
     return buildCatalogActionItems(svc.name, svc.actions)
-  }, [currentPage, catalogServices, scope])
+  }, [canOperate, currentPage, catalogServices, scope])
 
   const visibleCatalogItems = useMemo(
     () =>

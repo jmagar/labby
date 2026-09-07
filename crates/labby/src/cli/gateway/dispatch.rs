@@ -20,18 +20,13 @@ use super::list::run_gateway_list;
 use super::oauth::run_gateway_oauth_start;
 use crate::live_gateway as remote;
 
-/// Dispatch `action`/`params` against the live `labby serve` daemon if one is
-/// reachable, falling back to the CLI's own local `GatewayManager` otherwise
-/// (built lazily, on first actual use -- see `LazyGatewayManager`).
+/// Dispatch `action`/`params` against the authoritative `labby serve` daemon.
 ///
-/// This is what keeps CLI mutations (`add`, `update`, `remove`, `reload`, ...)
-/// from silently diverging from what the WebUI/MCP surfaces see: the WebUI is
-/// served *by* the live daemon and shares its manager directly, while a CLI
-/// invocation is a separate process with its own throwaway manager built
-/// fresh from `config.toml`. See `crate::live_gateway` module docs for the full
-/// rationale.
+/// Gateway actions may be scoped by the daemon's authenticated caller and
+/// selected Team/Project. A one-shot local manager has neither, so falling back
+/// to one would turn a failed authority lookup into installation-wide access.
 pub(super) async fn dispatch_gateway_action(
-    manager: &LazyGatewayManager<'_>,
+    _manager: &LazyGatewayManager<'_>,
     config: &LabConfig,
     action: String,
     params: Value,
@@ -39,11 +34,14 @@ pub(super) async fn dispatch_gateway_action(
     if let Some(live) = remote::detect(config, "cli").await? {
         return live.dispatch_action(&action, params).await;
     }
-    let manager = manager.get().await.map_err(|e| ToolError::Sdk {
-        sdk_kind: "internal_error".to_string(),
-        message: format!("failed to build local gateway manager: {e}"),
-    })?;
-    crate::dispatch::gateway::dispatch_with_manager(&manager, &action, params).await
+    Err(gateway_daemon_unavailable())
+}
+
+fn gateway_daemon_unavailable() -> ToolError {
+    ToolError::Sdk {
+        sdk_kind: "daemon_unavailable".to_owned(),
+        message: "Gateway CLI actions require an authoritative Labby daemon".to_owned(),
+    }
 }
 
 fn protected_route_target_from_args(
@@ -149,6 +147,7 @@ fn loadout_from_create_args(args: GatewayLoadoutCreateArgs) -> GatewayLoadoutCon
         description: args.description,
         upstreams: args.upstreams,
         services: args.services,
+        credential_bindings: Vec::new(),
         expose_code_mode: args.code_mode,
         expose_tools: !args.no_tools,
         expose_resources: !args.no_resources,
@@ -773,6 +772,17 @@ mod tests {
             manager.built().is_none(),
             "local GatewayManager (and its auth.db) must not be constructed when the remote path succeeds"
         );
+    }
+
+    #[test]
+    fn missing_daemon_is_not_a_local_authority_fallback() {
+        let error = gateway_daemon_unavailable();
+        assert!(matches!(
+            error,
+            ToolError::Sdk { ref sdk_kind, ref message }
+                if sdk_kind == "daemon_unavailable"
+                    && message.contains("authoritative Labby daemon")
+        ));
     }
 
     fn parsed_update(args: &[&str]) -> GatewayUpdateArgs {

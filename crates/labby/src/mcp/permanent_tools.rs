@@ -214,6 +214,9 @@ fn builtin_service_annotations(service: &RegisteredService) -> ToolAnnotations {
         "stash" => (false, derived_destructive, false, false),
         "skills" => (true, derived_destructive, true, true),
         "doctor" => (false, derived_destructive, true, true),
+        "access" | "agents" | "tasks" | "dev_containers" => {
+            (false, derived_destructive, false, false)
+        }
         "browser" | "gateway" | "setup" | "snippets" | "artifacts" | "bundles" | "jobs"
         | "sources" | "uploads" => (false, derived_destructive, false, true),
         // `server_logs` is operationally read-only, but advertising it as such
@@ -697,6 +700,10 @@ mod tests {
     /// `every_registry_service_has_a_reviewed_hint_row` turns into a CI failure
     /// rather than a silent conservative default.
     const EXPECTED_SERVICE_ANNOTATIONS: &[(&str, bool, bool, bool, bool)] = &[
+        ("access", false, false, false, false),
+        ("agents", false, false, false, false),
+        ("tasks", false, false, false, false),
+        ("dev_containers", false, true, false, false),
         ("doctor", false, false, true, true),
         ("artifacts", false, true, false, true),
         ("browser", false, false, false, true),
@@ -973,6 +980,8 @@ mod tests {
 
         // Reachable by a caller with `can_execute() == false` at hop 2.
         let expected_callable = [
+            "access",
+            "agents",
             "browser",
             "doctor",
             "fs",
@@ -980,6 +989,7 @@ mod tests {
             "lab_admin",
             "mcp_app",
             "sources",
+            "tasks",
             "uploads",
             "gateway_status",
             CODE_MODE_READ_TOOL_NAME,

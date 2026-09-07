@@ -20,6 +20,10 @@ pub(crate) enum AccessStoreError {
     InsecurePermissions { path: PathBuf },
     #[error("access store schema {found} is newer than supported schema {supported}")]
     UnsupportedSchema { found: i64, supported: i64 },
+    #[error("access store migration from schema {found} requires explicit operator approval")]
+    MigrationApprovalRequired { found: i64 },
+    #[error("access store migration evidence is invalid: {reason}")]
+    MigrationEvidenceInvalid { reason: String },
     #[error("access store integrity check failed: {check}")]
     IntegrityViolation { check: &'static str },
     #[error("access store relation references a missing parent")]
@@ -34,6 +38,12 @@ pub(crate) enum AccessStoreError {
     ProjectAccessUnavailable,
     #[error("not authorized")]
     NotAuthorized,
+    #[error("team access input is invalid")]
+    InvalidTeamInput,
+    #[error("team or membership is unavailable")]
+    TeamUnavailable,
+    #[error("an active team must retain at least one active owner")]
+    LastActiveTeamOwner,
     #[error("project loadout assignment input is invalid")]
     InvalidProjectLoadoutInput,
     #[error("project already has a different loadout assignment")]

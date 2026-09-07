@@ -5,7 +5,10 @@
 //! operation strings supplied by a caller.
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
+#[cfg(test)]
 use sha2::{Digest as _, Sha256};
 
 use crate::core::{ApiError, HttpClient};
@@ -53,7 +56,7 @@ pub enum Operation {
 }
 
 impl Operation {
-    const fn provider_name(self) -> &'static str {
+    pub const fn provider_name(self) -> &'static str {
         match self {
             Self::ArtifactsList => "depot.artifacts.list",
             Self::ArtifactsGet => "depot.artifacts.get",
@@ -93,9 +96,12 @@ impl Operation {
         }
     }
 
+    #[cfg(test)]
     fn expected_input_schema(self) -> Value {
         let properties = match self {
-            Self::ArtifactsList => json!({"cursor":{"type":"string"},"limit":{"type":"integer"}}),
+            Self::ArtifactsList => {
+                json!({"cursor":{"type":"string"},"limit":{"type":"integer"},"query":{"type":"string"}})
+            }
             Self::ArtifactsGet => json!({"artifactId":{"type":"string"}}),
             Self::ArtifactsSearch | Self::SearchSkillsSh => {
                 json!({"query":{"type":"string"},"limit":{"type":"integer"}})
@@ -186,8 +192,81 @@ impl Operation {
         })
     }
 
-    fn expected_schema_fingerprint(self) -> String {
-        schema_fingerprint(&self.expected_input_schema())
+    const fn expected_schema_fingerprint(self) -> &'static str {
+        match self {
+            Self::AcpRegistryList
+            | Self::AuthorityStatus
+            | Self::SourcesList
+            | Self::BundlesList => {
+                "d746974fa9afd5e951f76f9af38954b0ad7f436f2120dc974da65e5ee39f856f"
+            }
+            Self::ArtifactsFollow => {
+                "95eacd7404183d82b5cec2ba9580920412a3fe86a9335f2138bcfbe8f2620146"
+            }
+            Self::ArtifactsFork => {
+                "43ca2e18ca6b00803a5ec78d4cfd75d0cdd04db7560f81199383141153fb6c36"
+            }
+            Self::ArtifactsGet => {
+                "b42f3f0ce0afc95cb8fbcb7c96907f9b88643bafc51efc602c1b21dba82c148d"
+            }
+            Self::CandidatesIntake => {
+                "fdd4be598017b2dc7dacdb50121c680bf187d74c4aa1da9d98232c300b793909"
+            }
+            Self::ArtifactsList => {
+                "ae219779387114fe51269259a5a15c433fbc89135ee89a00a4e1340486f829c5"
+            }
+            Self::CandidatesList => {
+                "43dcf18f5fd2e277fe21f98cde881f4125e315636ef241ac6b03526aad1d4142"
+            }
+            Self::ArtifactsSetLicense => {
+                "0faaf5e02f9ffbc63815216e02737628c82de4b707e0647a67dbe5d76ce91018"
+            }
+            Self::ArtifactsSetPublication => {
+                "e9ea567f18a713da54460bffd66fbd001c974fcde4c9596bc67b708ef7fbad0a"
+            }
+            Self::BundlesAddArtifact | Self::BundlesRemoveArtifact => {
+                "0d78c3e334861b262e00e14859b58f668705182efe6d58e4579e98bafe123667"
+            }
+            Self::BundlesCreate => {
+                "1e17f3565ca13065470821a627efa315041c47824810102a63f7a1fce8b64872"
+            }
+            Self::BundlesDelete | Self::BundlesGet | Self::BundlesPublish => {
+                "f1e10caa02e84b19379ff3dd72305297bdec7db6ccf8c7690832f29b98669126"
+            }
+            Self::BundlesSetVisibility => {
+                "68fc8ba08ee71a0c59de90590e7fb404c6052c70d463f688c54aab6678ee863e"
+            }
+            Self::JobsCancel | Self::JobsGet | Self::JobsRetry => {
+                "1bd036f81ee6548a36d3981c6262f6285203325c7ecef94967e5b480ec4bf227"
+            }
+            Self::JobsList => "58b36a607269af9547505db30cf7b936ea7b192c5eb8c241a36aa3d528089f92",
+            Self::JobsStart => "bfb8b4a43a3942c3beb867e5daa21f8660ac872404c8de7332269c10d37ebdc7",
+            Self::McpRegistryList => {
+                "08d503577793cd5f35fd6c549b388ef3038d7357114c7d9cb7e6812406770d8b"
+            }
+            Self::ArtifactsSearch => {
+                "964f29b4c9d7e241eb40b1e008bf38f07c3959aae1f785f9d4b6210fc1bd0925"
+            }
+            Self::SearchArd => "f02862af885d5d524a3eb6fbf6c8b0e80a951d0c80e5a43a4b92d4a326770478",
+            Self::SearchMarketplace => {
+                "230081d99596c5eb013874d30d54846c44a48a1131463ebc66f72d0bd2a372d7"
+            }
+            Self::SearchSkillsSh => {
+                "cfb8b3b48d34ff9dbdd5f871c924a2d8de67aa4a352e5e43a3839b5cd39a554c"
+            }
+            Self::SourcesConfigure => {
+                "36e5d7687b4405ece34e578bfbfdbef0cf6a98cfe11d794caf7ed28243d396a4"
+            }
+            Self::SourcesDelete | Self::SourcesRefresh => {
+                "da509757177840226aa748312fb2b571c7ac35a1636be268f3cc94eeed419724"
+            }
+            Self::UploadsCreate => {
+                "0494e00291f11c25b559db7e25a50761791f3d3d13bd411694cd304cbaf6d3e9"
+            }
+            Self::UploadsDelete | Self::UploadsGet => {
+                "81207c6d9931f2b06f5216d259e7657cf2235049ee95041e8e1a5ba827efe720"
+            }
+        }
     }
 }
 
@@ -222,19 +301,27 @@ impl ArtifactControlClient {
     /// Returns the shared API error taxonomy for transport, authorization,
     /// upstream status, or malformed envelopes.
     pub async fn execute(&self, operation: Operation, params: &Value) -> Result<Value, ApiError> {
+        self.execute_with_headers(operation, params, reqwest::header::HeaderMap::new())
+            .await
+    }
+
+    /// Execute one curated operation with exact request-local delegation headers.
+    pub async fn execute_with_headers(
+        &self,
+        operation: Operation,
+        params: &Value,
+        headers: reqwest::header::HeaderMap,
+    ) -> Result<Value, ApiError> {
         let catalog: OperationCatalog = self
             .http
             .get_json_bounded("/api/operations", MAX_CONTROL_PLANE_RESPONSE_BYTES)
             .await?;
         let compatible = catalog.operations.iter().any(|definition| {
-            let input_schema = definition.get("inputSchema");
             let declared_fingerprint = definition.get("schemaFingerprint").and_then(Value::as_str);
-            let expected_fingerprint = operation.expected_schema_fingerprint();
             definition.get("name").and_then(Value::as_str) == Some(operation.provider_name())
                 && definition.get("contractVersion").and_then(Value::as_u64)
                     == Some(OPERATION_CONTRACT_VERSION)
-                && declared_fingerprint == input_schema.map(schema_fingerprint).as_deref()
-                && declared_fingerprint == Some(expected_fingerprint.as_str())
+                && declared_fingerprint == Some(operation.expected_schema_fingerprint())
                 && definition
                     .pointer("/inputSchema/type")
                     .and_then(Value::as_str)
@@ -255,7 +342,12 @@ impl ArtifactControlClient {
         );
         let response: OperationEnvelope = self
             .http
-            .post_json_bounded(&path, params, MAX_CONTROL_PLANE_RESPONSE_BYTES)
+            .post_json_bounded_with_headers(
+                &path,
+                params,
+                headers,
+                MAX_CONTROL_PLANE_RESPONSE_BYTES,
+            )
             .await?;
         Ok(response.result)
     }
@@ -268,19 +360,40 @@ impl ArtifactControlClient {
         content_length: Option<u64>,
         content_type: &str,
     ) -> Result<Value, ApiError> {
+        self.upload_with_headers(
+            upload_id,
+            body,
+            content_length,
+            content_type,
+            reqwest::header::HeaderMap::new(),
+        )
+        .await
+    }
+
+    /// Upload opaque bytes with exact request-local delegation headers.
+    pub async fn upload_with_headers(
+        &self,
+        upload_id: &str,
+        body: reqwest::Body,
+        content_length: Option<u64>,
+        content_type: &str,
+        headers: reqwest::header::HeaderMap,
+    ) -> Result<Value, ApiError> {
         let path = format!("/uploads/{}", HttpClient::encode_path_segment(upload_id));
         self.http
-            .put_body_bounded(
+            .put_body_bounded_with_headers(
                 &path,
                 body,
                 content_length,
                 content_type,
+                headers,
                 MAX_CONTROL_PLANE_RESPONSE_BYTES,
             )
             .await
     }
 }
 
+#[cfg(test)]
 fn schema_fingerprint(schema: &Value) -> String {
     let mut hasher = Sha256::new();
     hasher.update(schema.to_string().as_bytes());
@@ -307,7 +420,7 @@ mod tests {
         json!({
             "name": operation.provider_name(),
             "contractVersion": 1,
-            "schemaFingerprint": schema_fingerprint(&input_schema),
+            "schemaFingerprint": operation.expected_schema_fingerprint(),
             "inputSchema": input_schema,
             "outputSchema": {"type":"object"}
         })
@@ -408,7 +521,7 @@ mod tests {
             json!({
                 "name": "depot.system.status",
                 "contractVersion": 2,
-                "schemaFingerprint": valid_fingerprint.clone(),
+                "schemaFingerprint": valid_fingerprint,
                 "inputSchema": Operation::AuthorityStatus.expected_input_schema(),
                 "outputSchema": {"type":"object"}
             }),

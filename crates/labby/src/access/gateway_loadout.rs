@@ -351,10 +351,15 @@ fn map_access_error(error: AccessStoreError) -> GatewayLoadoutAssignmentError {
         | AccessStoreError::MissingParent { .. }
         | AccessStoreError::InsecurePermissions { .. }
         | AccessStoreError::UnsupportedSchema { .. }
+        | AccessStoreError::MigrationApprovalRequired { .. }
+        | AccessStoreError::MigrationEvidenceInvalid { .. }
         | AccessStoreError::IntegrityViolation { .. }
         | AccessStoreError::ForeignKeyViolation
         | AccessStoreError::BootstrapConflict
         | AccessStoreError::InvalidBootstrapInput
+        | AccessStoreError::InvalidTeamInput
+        | AccessStoreError::TeamUnavailable
+        | AccessStoreError::LastActiveTeamOwner
         | AccessStoreError::MalformedVocabulary
         | AccessStoreError::Unavailable(_) => GatewayLoadoutAssignmentError::AccessUnavailable,
     }
@@ -491,7 +496,7 @@ mod tests {
         assert_eq!(outcome, AssignProjectLoadoutOutcome::Assigned);
         assert_eq!(
             store.loadout_state_for_test().await.unwrap(),
-            (1, 2, 1, 1, 2)
+            (1, 2, 1, 1, 4)
         );
         assert_eq!(
             store.loadout_audit_for_test().await.unwrap().0,
@@ -1192,7 +1197,7 @@ mod tests {
         ));
         assert_eq!(
             store.loadout_state_for_test().await.unwrap(),
-            (0, 1, 0, 0, 1)
+            (0, 1, 0, 0, 3)
         );
     }
 }

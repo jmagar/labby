@@ -138,11 +138,14 @@ impl LabMcpServer {
                 true,
             )
         };
+        let selected_team_id =
+            optional_header_str(&parts.headers, "x-labby-team-id")?.map(str::to_owned);
         let caller = crate::dispatch::skill_library::auth::SkillLibraryCaller::new(
             identity.clone(),
             auth.scopes.clone(),
             transport,
-        );
+        )
+        .with_selected_team_id(selected_team_id.clone());
         let request_id =
             optional_header_str(&parts.headers, "x-request-id")?.unwrap_or("mcp-skills-read");
         let correlation =
@@ -214,27 +217,30 @@ impl LabMcpServer {
         } else {
             crate::dispatch::skill_library::auth::SkillLibraryTransport::app_callback(true, true)
         };
+        let selected_team_id =
+            optional_header_str(&parts.headers, "x-labby-team-id")?.map(str::to_owned);
         let caller = crate::dispatch::skill_library::auth::SkillLibraryCaller::new(
             boundary.identity.clone(),
             boundary.scopes.clone(),
             transport,
-        );
+        )
+        .with_selected_team_id(selected_team_id.clone());
         if crate::dispatch::remote_control::REMOTE_ARTIFACT_ACTIONS
             .iter()
             .any(|candidate| candidate.name == action)
         {
-            let spec = crate::dispatch::remote_control::REMOTE_ARTIFACT_ACTIONS
-                .iter()
-                .find(|candidate| candidate.name == action);
-            let permission = if spec.is_some_and(|spec| spec.requires_admin) {
-                crate::access::Permission::AssetUse
-            } else {
-                crate::access::Permission::AssetDiscover
-            };
+            let operation = crate::dispatch::remote_control::operation("artifacts", action)
+                .ok_or_else(|| ToolError::UnknownAction {
+                    message: format!("Unknown action: {action}"),
+                    valid: Vec::new(),
+                    hint: None,
+                })?;
+            let permission = crate::dispatch::artifact_control::operation_permission(operation);
             let authority = crate::dispatch::artifact_control::authorize_authority_context(
                 &self.access_runtime,
                 boundary.identity,
                 project_id,
+                selected_team_id.as_deref(),
                 permission,
             )
             .await?;

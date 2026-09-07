@@ -2005,6 +2005,7 @@ dependencies = [
  "diffy-imara",
  "dirs",
  "dotenvy",
+ "ed25519-dalek",
  "fd-lock",
  "futures",
  "getrandom 0.4.2",
@@ -2249,6 +2250,8 @@ name = "labby-primitives"
 version = "1.15.1"
 dependencies = [
  "base64 0.22.1",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "url",
 ]
@@ -2261,6 +2264,7 @@ dependencies = [
  "base64 0.22.1",
  "futures",
  "jiff",
+ "labby-primitives",
  "regex",
  "reqwest",
  "serde",

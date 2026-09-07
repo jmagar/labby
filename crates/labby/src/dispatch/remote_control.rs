@@ -854,7 +854,7 @@ fn reject_secret_values(object: &serde_json::Map<String, Value>) -> Result<(), T
     }
 }
 
-fn operation(service: &str, action: &str) -> Option<Operation> {
+pub(crate) fn operation(service: &str, action: &str) -> Option<Operation> {
     Some(match (service, action) {
         ("artifacts", "artifacts.search_remote") => Operation::ArtifactsSearch,
         ("artifacts", "artifacts.list_remote") => Operation::ArtifactsList,

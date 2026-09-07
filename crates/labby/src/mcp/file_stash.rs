@@ -16,18 +16,17 @@ use crate::mcp::context::{
 use crate::mcp::server::LabMcpServer;
 
 pub(crate) const TEMPLATE_URI: &str = "stash://me/files/{file_id}";
+/// Request-scoped Stash owner selection. This value chooses a scope; it grants
+/// no authority and is always re-evaluated against the verified caller.
+pub(crate) const OWNER_META_KEY: &str = "ai.dinglebear.labby/stashOwner";
 const PRIVATE_IN_PROCESS_TRANSPORT: &str = "in-process";
 
-pub(crate) struct ResolvedStashPrincipal {
-    id: PrincipalId,
-    _lease: crate::access::ActiveFileStashPrincipalLease,
-}
-
-impl std::ops::Deref for ResolvedStashPrincipal {
-    type Target = PrincipalId;
-    fn deref(&self) -> &Self::Target {
-        &self.id
-    }
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StashOwnerSelection {
+    kind: String,
+    #[serde(default)]
+    id: Option<String>,
 }
 
 impl LabMcpServer {
@@ -42,39 +41,96 @@ impl LabMcpServer {
         action: &str,
         params: serde_json::Value,
         context: &RequestContext<RoleServer>,
-        meta: Option<&rmcp::model::RequestMetaObject>,
+        _meta: Option<&rmcp::model::RequestMetaObject>,
     ) -> Result<serde_json::Value, ToolError> {
         match service {
-            "stash" => {
-                let (principal, validated_grantee) = if action == "stash.grants.create" {
-                    let recipient = params
-                        .get("grantee_principal_id")
-                        .and_then(serde_json::Value::as_str)
-                        .ok_or_else(|| ToolError::InvalidParam {
-                            param: "grantee_principal_id".into(),
-                            message: "invalid File Stash parameter".into(),
-                        })?
-                        .to_owned();
-                    let (owner, recipient, lease) = self
-                        .file_stash_participants(context, meta, recipient)
-                        .await?;
-                    (
-                        ResolvedStashPrincipal {
-                            id: owner,
-                            _lease: lease,
+            "agents" | "tasks" => {
+                let identity = context
+                    .extensions
+                    .get::<labby_auth::VerifiedIdentity>()
+                    .cloned()
+                    .or_else(|| {
+                        context
+                            .extensions
+                            .get::<Parts>()
+                            .and_then(|parts| {
+                                parts.extensions.get::<labby_auth::VerifiedIdentity>()
+                            })
+                            .cloned()
+                    })
+                    .ok_or_else(forbidden)?;
+                let store = self.access_runtime.store().await.map_err(|_| forbidden())?;
+                let auth = auth_context_from_extensions(&context.extensions);
+                let ceiling = auth.map_or_else(
+                    crate::access::AuthorityCeiling::trusted_local,
+                    crate::access::AuthorityCeiling::from_auth_context,
+                );
+                if service == "agents" {
+                    crate::dispatch::agents::dispatch(
+                        crate::dispatch::agents::AgentDispatchContext {
+                            store,
+                            identity,
+                            ceiling,
                         },
-                        Some(recipient),
+                        action,
+                        params,
                     )
+                    .await
                 } else {
-                    (self.file_stash_principal(context, meta).await?, None)
-                };
+                    crate::dispatch::tasks::dispatch(
+                        crate::dispatch::tasks::TaskDispatchContext {
+                            store,
+                            identity,
+                            ceiling,
+                        },
+                        action,
+                        params,
+                    )
+                    .await
+                }
+            }
+            "stash" => {
+                let identity = context
+                    .extensions
+                    .get::<labby_auth::VerifiedIdentity>()
+                    .cloned()
+                    .or_else(|| {
+                        context
+                            .extensions
+                            .get::<Parts>()
+                            .and_then(|p| p.extensions.get::<labby_auth::VerifiedIdentity>())
+                            .cloned()
+                    })
+                    .ok_or_else(forbidden)?;
+                let owner =
+                    stash_owner_from_params(&params, &identity, &self.access_runtime).await?;
+                let capability = stash_capability(action);
+                let ceiling = auth_context_from_extensions(&context.extensions).map_or_else(
+                    crate::access::AuthorityCeiling::trusted_local,
+                    crate::access::AuthorityCeiling::from_auth_context,
+                );
+                let principal = self
+                    .access_runtime
+                    .authorize_file_stash_owner(
+                        identity,
+                        ceiling,
+                        owner,
+                        action,
+                        capability,
+                        unix_millis(),
+                    )
+                    .await
+                    .map_err(|_| forbidden())?;
+                principal
+                    .validate_before_commit()
+                    .await
+                    .map_err(|_| forbidden())?;
                 crate::dispatch::file_stash::dispatch_for_principal(
                     &self.file_stash_service(),
                     &principal,
                     "mcp",
                     action,
                     params,
-                    validated_grantee.as_ref(),
                 )
                 .await
             }
@@ -100,7 +156,7 @@ impl LabMcpServer {
         &self,
         context: &RequestContext<RoleServer>,
         meta: Option<&rmcp::model::RequestMetaObject>,
-    ) -> Result<ResolvedStashPrincipal, ToolError> {
+    ) -> Result<AuthorizedStashPrincipal, ToolError> {
         let caller = resolve_caller_authorization(
             auth_context_from_extensions(&context.extensions),
             self.absent_auth_trust(),
@@ -112,11 +168,38 @@ impl LabMcpServer {
         if let Some(parts) = context.extensions.get::<Parts>()
             && let Some(identity) = parts.extensions.get::<labby_auth::VerifiedIdentity>()
         {
+            let owner = if let Some(owner) =
+                selected_stash_owner(meta, identity, &self.access_runtime).await?
+            {
+                owner
+            } else {
+                use labby_primitives::access::OwnerScope;
+                let principal = self
+                    .access_runtime
+                    .resolve_file_stash_principal(identity.clone())
+                    .await
+                    .map_err(|_| forbidden())?;
+                OwnerScope::Personal(
+                    labby_primitives::access::PrincipalId::new(principal.as_str())
+                        .map_err(|_| forbidden())?,
+                )
+            };
+            let ceiling = auth_context_from_extensions(&context.extensions).map_or_else(
+                crate::access::AuthorityCeiling::trusted_local,
+                crate::access::AuthorityCeiling::from_auth_context,
+            );
             return self
                 .access_runtime
-                .resolve_and_lease_file_stash_principal(identity.clone())
+                .authorize_file_stash_owner(
+                    identity.clone(),
+                    ceiling,
+                    owner,
+                    "stash.resources.read",
+                    labby_primitives::access::Capability::ScopeRead,
+                    unix_millis(),
+                )
                 .await
-                .map(|(id, lease)| ResolvedStashPrincipal { id, _lease: lease })
+                .map(AuthorizedStashPrincipal::sealed)
                 .map_err(|_| forbidden());
         }
         // Serialized principal IDs are trusted on only the private in-process
@@ -128,54 +211,8 @@ impl LabMcpServer {
                 .access_runtime
                 .lease_active_file_stash_principal(principal.clone())
                 .await
-                .map(|lease| ResolvedStashPrincipal {
-                    id: principal,
-                    _lease: lease,
-                })
+                .map(|_| AuthorizedStashPrincipal::trusted(principal))
                 .map_err(|_| forbidden());
-        }
-        Err(forbidden())
-    }
-
-    async fn file_stash_participants(
-        &self,
-        context: &RequestContext<RoleServer>,
-        meta: Option<&rmcp::model::RequestMetaObject>,
-        recipient: String,
-    ) -> Result<
-        (
-            PrincipalId,
-            PrincipalId,
-            crate::access::ActiveFileStashPrincipalLease,
-        ),
-        ToolError,
-    > {
-        let caller = resolve_caller_authorization(
-            auth_context_from_extensions(&context.extensions),
-            self.absent_auth_trust(),
-            propagated_caller_auth(meta),
-        );
-        if !caller.can_read() {
-            return Err(forbidden());
-        }
-        if let Some(parts) = context.extensions.get::<Parts>()
-            && let Some(identity) = parts.extensions.get::<labby_auth::VerifiedIdentity>()
-        {
-            return self
-                .access_runtime
-                .resolve_and_lease_file_stash_participants(identity.clone(), recipient)
-                .await
-                .map_err(|_| forbidden());
-        }
-        if let Some(owner) =
-            propagated_file_stash_principal(self.transport_label, propagated_caller_auth(meta))
-        {
-            let (recipient, lease) = self
-                .access_runtime
-                .lease_file_stash_participants(owner.clone(), recipient)
-                .await
-                .map_err(|_| forbidden())?;
-            return Ok((owner, recipient, lease));
         }
         Err(forbidden())
     }
@@ -183,72 +220,29 @@ impl LabMcpServer {
     pub(crate) async fn file_stash_resources(
         &self,
         context: &RequestContext<RoleServer>,
-    ) -> Result<Vec<Resource>, ErrorData> {
-        let caller = resolve_caller_authorization(
-            auth_context_from_extensions(&context.extensions),
-            self.absent_auth_trust(),
-            propagated_caller_auth(Some(&context.meta)),
-        );
-        // Resource listing is additive across services. A caller without the
-        // Stash read scope should simply not see Stash resources; once the
-        // caller is authorized, identity/storage failures remain observable.
-        if !caller.can_read() {
-            return Ok(Vec::new());
+    ) -> Vec<Resource> {
+        if !self.file_stash_caller_bound()
+            || !self.route_scope.allows_service("stash")
+            || !self.service_visible_on_mcp("stash").await
+        {
+            return Vec::new();
         }
-        let verified_identity = context
-            .extensions
-            .get::<Parts>()
-            .and_then(|parts| parts.extensions.get::<labby_auth::VerifiedIdentity>())
-            .cloned();
-        let has_private_principal = propagated_file_stash_principal(
-            self.transport_label,
-            propagated_caller_auth(Some(&context.meta)),
-        )
-        .is_some();
-        if verified_identity.is_none() && !has_private_principal {
-            return Ok(Vec::new());
+        let Ok(principal) = self
+            .file_stash_principal(context, Some(&context.meta))
+            .await
+        else {
+            return Vec::new();
+        };
+        if principal.validate_before_commit().await.is_err() {
+            return Vec::new();
         }
-        crate::dispatch::file_stash::observe_result(
-            "mcp",
-            "stash.resources.list",
-            None,
-            None,
-            None,
-            false,
-            async {
-                if !self.file_stash_caller_bound()
-                    || !self.route_scope.allows_service("stash")
-                    || !self.service_visible_on_mcp("stash").await
-                {
-                    return Ok(Vec::new());
-                }
-                let principal = if let Some(identity) = verified_identity {
-                    match self
-                        .access_runtime
-                        .resolve_and_lease_file_stash_principal(identity)
-                        .await
-                    {
-                        Ok((id, lease)) => ResolvedStashPrincipal { id, _lease: lease },
-                        // Resource listing is additive. A verified identity
-                        // without a durable Stash principal (including a host
-                        // where the access store is not configured) contributes
-                        // no Stash resources without hiding other providers.
-                        Err(_) => return Ok(Vec::new()),
-                    }
-                } else {
-                    self.file_stash_principal(context, Some(&context.meta))
-                        .await?
-                };
-                collect_file_stash_resources(
-                    &self.file_stash_service(),
-                    &principal,
-                    self.file_stash_runtime.page_limit(),
-                )
-                .await
-            },
+        collect_file_stash_resources(
+            &self.file_stash_service(),
+            &principal,
+            self.file_stash_runtime.page_limit(),
         )
         .await
-        .map_err(|error| list_error(&error))
+        .unwrap_or_default()
     }
 
     pub(crate) async fn read_file_stash_resource(
@@ -256,73 +250,154 @@ impl LabMcpServer {
         uri: &str,
         context: &RequestContext<RoleServer>,
     ) -> Result<rmcp::model::ReadResourceResponse, ErrorData> {
-        let observed_file_id = parse_stash_uri(uri).ok();
-        crate::dispatch::file_stash::observe_result(
-            "mcp",
-            "stash.resource.read",
-            observed_file_id.as_deref(),
-            None,
-            None,
-            false,
-            async {
-                let file_id = parse_stash_uri(uri)?;
-                let principal = self
-                    .file_stash_principal(context, Some(&context.meta))
-                    .await?;
-                let stash = self.file_stash_service();
-                let (_metadata, mut blob) = stash.open_download(&principal, &file_id, true).await?;
-                let capacity = usize::try_from(blob.size).map_err(|_| ToolError::Sdk {
-                    sdk_kind: "quota_exceeded".to_owned(),
-                    message: "File Stash operation failed".to_owned(),
-                })?;
-                let mut bytes = Vec::with_capacity(capacity);
-                let read_limit = blob.size.saturating_add(1);
-                (&mut blob)
-                    .take(read_limit)
-                    .read_to_end(&mut bytes)
-                    .await
-                    .map_err(|_| ToolError::Sdk {
-                        sdk_kind: "service_unavailable".to_owned(),
-                        message: "File Stash operation failed".to_owned(),
-                    })?;
-                if bytes.len() != capacity {
-                    return Err(ToolError::Sdk {
-                        sdk_kind: "integrity_error".to_owned(),
-                        message: "File Stash operation failed".to_owned(),
-                    });
-                }
-                crate::dispatch::file_stash::capture_observation_details(
-                    Some(&file_id),
-                    None,
-                    Some(u64::try_from(bytes.len()).unwrap_or(u64::MAX)),
-                );
-                let contents = ResourceContents::blob(
-                    base64::engine::general_purpose::STANDARD.encode(bytes),
-                    uri.to_owned(),
-                )
-                .with_mime_type("application/octet-stream");
-                Ok(ReadResourceResult::new(vec![contents]).into())
-            },
+        let file_id = parse_stash_uri(uri).map_err(|_| unknown(uri))?;
+        let principal = self
+            .file_stash_principal(context, Some(&context.meta))
+            .await
+            .map_err(|_| unknown(uri))?;
+        let (_metadata, mut blob) = self
+            .file_stash_service()
+            .open_download(&principal, &file_id, true)
+            .await
+            .map_err(|error| match error.kind() {
+                "quota_exceeded" => quota_exceeded(uri),
+                "not_found" => unknown(uri),
+                "busy" => busy(uri),
+                _ => unavailable(uri),
+            })?;
+        principal
+            .validate_before_commit()
+            .await
+            .map_err(|_| unknown(uri))?;
+        let capacity = usize::try_from(blob.size).map_err(|_| quota_exceeded(uri))?;
+        let mut bytes = Vec::with_capacity(capacity);
+        (&mut blob.file)
+            .take(blob.size.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|_| unavailable(uri))?;
+        if bytes.len() != capacity {
+            return Err(unavailable(uri));
+        }
+        let contents = ResourceContents::blob(
+            base64::engine::general_purpose::STANDARD.encode(bytes),
+            uri.to_owned(),
         )
-        .await
-        .map_err(|error| map_resource_read_error(&error, uri))
+        .with_mime_type("application/octet-stream");
+        Ok(ReadResourceResult::new(vec![contents]).into())
     }
 }
 
-fn list_error(error: &ToolError) -> ErrorData {
-    ErrorData::internal_error(
-        "File Stash resources could not be listed",
-        Some(serde_json::json!({"kind": error.kind()})),
-    )
+pub(crate) struct AuthorizedStashPrincipal {
+    principal: PrincipalId,
+    authority: Option<crate::access::FileStashOwnerAuthorization>,
 }
 
-fn map_resource_read_error(error: &ToolError, uri: &str) -> ErrorData {
-    match error.kind() {
-        "invalid_param" | "forbidden" | "not_found" => unknown(uri),
-        "quota_exceeded" => quota_exceeded(uri),
-        "busy" => busy(uri),
-        _ => unavailable(uri),
+impl AuthorizedStashPrincipal {
+    fn sealed(authority: crate::access::FileStashOwnerAuthorization) -> Self {
+        Self {
+            principal: (*authority).clone(),
+            authority: Some(authority),
+        }
     }
+
+    fn trusted(principal: PrincipalId) -> Self {
+        Self {
+            principal,
+            authority: None,
+        }
+    }
+
+    async fn validate_before_commit(&self) -> Result<(), ToolError> {
+        if let Some(authority) = &self.authority {
+            authority
+                .validate_before_commit()
+                .await
+                .map_err(|_| forbidden())?;
+        }
+        Ok(())
+    }
+}
+
+impl std::ops::Deref for AuthorizedStashPrincipal {
+    type Target = PrincipalId;
+
+    fn deref(&self) -> &Self::Target {
+        &self.principal
+    }
+}
+
+async fn selected_stash_owner(
+    meta: Option<&rmcp::model::RequestMetaObject>,
+    identity: &labby_auth::VerifiedIdentity,
+    runtime: &crate::access::AccessRuntime,
+) -> Result<Option<labby_primitives::access::OwnerScope>, ToolError> {
+    use labby_primitives::access::{OwnerScope, PrincipalId, TeamId};
+    let Some(value) = meta.and_then(|meta| meta.get(OWNER_META_KEY)) else {
+        return Ok(None);
+    };
+    let selection: StashOwnerSelection =
+        serde_json::from_value(value.clone()).map_err(|_| forbidden())?;
+    match selection.kind.as_str() {
+        "personal" if selection.id.is_none() => {
+            let principal = runtime
+                .resolve_file_stash_principal(identity.clone())
+                .await
+                .map_err(|_| forbidden())?;
+            Ok(Some(OwnerScope::Personal(
+                PrincipalId::new(principal.as_str()).map_err(|_| forbidden())?,
+            )))
+        }
+        "team" => Ok(Some(OwnerScope::Team(
+            TeamId::new(selection.id.as_deref().ok_or_else(forbidden)?).map_err(|_| forbidden())?,
+        ))),
+        _ => Err(forbidden()),
+    }
+}
+
+async fn stash_owner_from_params(
+    params: &serde_json::Value,
+    identity: &labby_auth::VerifiedIdentity,
+    runtime: &crate::access::AccessRuntime,
+) -> Result<labby_primitives::access::OwnerScope, ToolError> {
+    use labby_primitives::access::{OwnerScope, PrincipalId, TeamId};
+    match params.get("owner_kind").and_then(serde_json::Value::as_str) {
+        None | Some("personal") => {
+            let principal = runtime
+                .resolve_file_stash_principal(identity.clone())
+                .await
+                .map_err(|_| forbidden())?;
+            Ok(OwnerScope::Personal(
+                PrincipalId::new(principal.as_str()).map_err(|_| forbidden())?,
+            ))
+        }
+        Some("team") => Ok(OwnerScope::Team(
+            TeamId::new(
+                params
+                    .get("owner_id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(forbidden)?,
+            )
+            .map_err(|_| forbidden())?,
+        )),
+        _ => Err(forbidden()),
+    }
+}
+fn stash_capability(action: &str) -> labby_primitives::access::Capability {
+    use labby_primitives::access::Capability;
+    match action {
+        "stash.list" | "stash.search" | "stash.stats" | "stash.metadata" => Capability::ScopeRead,
+        "stash.delete" => Capability::ScopeDelete,
+        "stash.rename" | "stash.grants.create" | "stash.grants.list" | "stash.grants.revoke" => {
+            Capability::ScopeManage
+        }
+        _ => Capability::ScopeRead,
+    }
+}
+fn unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |v| u64::try_from(v.as_millis()).unwrap_or(u64::MAX))
 }
 
 async fn collect_file_stash_resources(
@@ -457,32 +532,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn resource_read_validation_auth_and_absence_are_non_enumerating() {
-        let uri = "stash://me/files/01ARZ3NDEKTSV4RRFFQ69G5FAV";
-        let errors = [
-            ToolError::InvalidParam {
-                param: "uri".to_owned(),
-                message: "invalid File Stash parameter".to_owned(),
-            },
-            forbidden(),
-            ToolError::Sdk {
-                sdk_kind: "not_found".to_owned(),
-                message: "File Stash operation failed".to_owned(),
-            },
-        ];
-        for error in errors {
-            let response = map_resource_read_error(&error, uri);
-            assert_eq!(response.code, rmcp::model::ErrorCode::RESOURCE_NOT_FOUND);
-            assert_eq!(response.message, "File Stash resource is unavailable");
-            assert_eq!(
-                response.data.as_ref().and_then(|data| data["uri"].as_str()),
-                Some(uri)
-            );
-        }
-    }
-
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     #[tokio::test]
     async fn resource_snapshot_walks_beyond_the_service_page_limit() {
         use std::os::unix::fs::PermissionsExt as _;
