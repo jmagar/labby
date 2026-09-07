@@ -93,6 +93,13 @@ async fn rust_supervisor_owns_live_backend_session_browser_and_cleanup() {
         .create_session()
         .await
         .expect("real browser session");
+    #[cfg(target_os = "linux")]
+    {
+        identity
+            .provision_stash_recipient("browser-stash-recipient", "Browser Stash Recipient")
+            .await
+            .expect("provision Stash recipient through live identity fixture");
+    }
     let session = identity.session.as_ref().expect("session materialized");
     let (cookie_name, cookie_value) = session.cookie.split_once('=').expect("cookie pair");
     // Chromium grants the Secure-cookie loopback exception to localhost,
@@ -105,6 +112,8 @@ async fn rust_supervisor_owns_live_backend_session_browser_and_cleanup() {
     let storage_state = fixture_root.join("storage-state.json");
     let csrf_state = fixture_root.join("csrf-state.json");
     let scan_secrets = fixture_root.join("scan-secrets.txt");
+    let restart_request = fixture_root.join("restart.request");
+    let restart_complete = fixture_root.join("restart.complete");
     write_private_json(
         &storage_state,
         &json!({
@@ -146,6 +155,10 @@ async fn rust_supervisor_owns_live_backend_session_browser_and_cleanup() {
             "csrf_state_path": csrf_state,
             "evidence_dir": evidence_dir,
             "scan_secrets_path": scan_secrets,
+            "restart_request_path": restart_request,
+            "restart_complete_path": restart_complete,
+            "stash_supported": cfg!(target_os = "linux"),
+            "recipient_principal_id": "browser-stash-recipient",
             "nightly": std::env::var("LABBY_LIVE_BROWSER_NIGHTLY").as_deref() == Ok("true")
         }),
     );
@@ -206,7 +219,19 @@ async fn rust_supervisor_owns_live_backend_session_browser_and_cleanup() {
         child.stderr.take().expect("stderr"),
         OUTPUT_LIMIT,
     ));
-    let status = tokio::time::timeout(Duration::from_secs(100), child.wait()).await;
+    let status = tokio::time::timeout(Duration::from_secs(100), async {
+        loop {
+            if restart_request.exists() && !restart_complete.exists() {
+                identity.restart().await.expect("browser-requested restart");
+                fs::write(&restart_complete, b"complete\n").expect("publish restart completion");
+            }
+            if let Some(status) = child.try_wait().expect("poll browser") {
+                break status;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
     if status.is_err() {
         drop(child.kill().await);
     }
@@ -214,7 +239,7 @@ async fn rust_supervisor_owns_live_backend_session_browser_and_cleanup() {
     let stderr = stderr_task.await.expect("stderr reader");
     let progress = fs::read(&browser_progress).unwrap_or_default();
     let browser_failure = match (status, stdout, stderr, progress.len() <= OUTPUT_LIMIT) {
-        (Ok(Ok(status)), Ok(_), Ok(_), true) if status.success() => None,
+        (Ok(status), Ok(_), Ok(_), true) if status.success() => None,
         (status, stdout, stderr, progress_ok) => Some(format!(
             "Playwright failed: status={status:?}; stdout={}; stderr={}; progress={}; progress_ok={progress_ok}",
             String::from_utf8_lossy(&stdout.unwrap_or_default()),

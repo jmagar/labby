@@ -227,6 +227,7 @@ fn test_server(
     LabMcpServer {
         registry: Arc::new(registry),
         access_runtime: Arc::new(crate::access::AccessRuntime::blocked_unavailable()),
+        file_stash_runtime: Arc::new(crate::file_stash::FileStashRuntime::blocked()),
         gateway_manager,
         peers: Default::default(),
         code_mode_app_state,
@@ -5562,6 +5563,7 @@ async fn server_reads_current_pool_from_gateway_manager() {
     let server = LabMcpServer {
         registry: Arc::new(ToolRegistry::new()),
         access_runtime: Arc::new(crate::access::AccessRuntime::blocked_unavailable()),
+        file_stash_runtime: Arc::new(crate::file_stash::FileStashRuntime::blocked()),
         gateway_manager: Some(Arc::clone(&manager)),
         peers: Arc::clone(&notifier.peers),
         code_mode_app_state: notifier.code_mode_app_state.clone(),

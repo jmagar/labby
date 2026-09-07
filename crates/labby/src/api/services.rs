@@ -47,6 +47,7 @@ pub mod access_credentials;
 pub mod catalog;
 pub mod depot;
 pub mod doctor;
+pub mod file_stash;
 #[cfg(feature = "gateway")]
 pub mod gateway;
 pub mod oauth_relay;

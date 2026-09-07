@@ -190,7 +190,10 @@ async fn every_api_action_reaches_live_http_or_proves_auth_denial() {
                         false,
                     )
                     .await;
-                    if intent.service == "bundles" {
+                    if intent.service == "bundles"
+                        || (intent.service == "stash"
+                            && !cfg!(target_os = "linux"))
+                    {
                         assert!(
                             matches!(
                                 denied_status,
@@ -385,6 +388,10 @@ async fn every_api_action_reaches_live_http_or_proves_auth_denial() {
         for provider_backed in ["artifacts", "bundles", "jobs", "sources", "uploads"] {
             success_capable_services.remove(provider_backed);
         }
+        // Stash requires a durable principal link, which this context-free
+        // catalog sweep intentionally does not forge. Its Linux success path
+        // is covered by the authenticated two-principal restart journey.
+        success_capable_services.remove("stash");
         assert_eq!(
             successes, success_capable_services,
             "every locally self-contained API service needs a live success"
@@ -402,8 +409,8 @@ async fn every_api_action_reaches_live_http_or_proves_auth_denial() {
         assert!(
             destructive_denials
                 .difference(&required_destructive_denials)
-                .all(|service| service == "bundles"),
-            "only the optional provider-backed bundles service may add a denial"
+                .all(|service| service == "bundles" || service == "stash"),
+            "only services with dedicated authenticated fixtures may add a denial"
         );
 
         // Valid reversible workflow: API create, CLI observation, API delete,

@@ -56,6 +56,7 @@ fn every_current_multi_surface_service_has_a_parity_partition() {
                 "setup",
                 "snippets",
                 "sources",
+                "stash",
                 "uploads"
             ])
         );

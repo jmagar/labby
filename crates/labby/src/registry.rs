@@ -140,9 +140,11 @@ pub enum RegisteredServiceKind {
     BuiltInUpstreamApi,
 }
 
-#[must_use]
-pub fn supports_context_free_dispatch(service: &RegisteredService) -> bool {
-    !matches!(service.name, "bundles" | "jobs" | "sources" | "uploads")
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DispatchCapability {
+    ContextFree,
+    CallerBound,
+    HttpContextOnly,
 }
 
 /// Collection of registered services, built at startup.
@@ -150,6 +152,7 @@ pub fn supports_context_free_dispatch(service: &RegisteredService) -> bool {
 pub struct ToolRegistry {
     services: Vec<RegisteredService>,
     action_names: Vec<&'static str>,
+    dispatch_capabilities: Vec<(&'static str, DispatchCapability)>,
     permanent_tools: crate::mcp::permanent_tools::PermanentToolRegistry,
 }
 
@@ -160,6 +163,7 @@ impl ToolRegistry {
         Self {
             services: Vec::new(),
             action_names: Vec::new(),
+            dispatch_capabilities: Vec::new(),
             permanent_tools: crate::mcp::permanent_tools::PermanentToolRegistry::new(),
         }
     }
@@ -172,6 +176,26 @@ impl ToolRegistry {
     /// - `status == "available"` requires at least one action.
     /// - `status == "stub"` requires an empty action slice.
     pub fn register(&mut self, service: RegisteredService) {
+        self.register_with_capability(service, DispatchCapability::ContextFree);
+    }
+
+    /// Register a service whose actions require transport-resolved caller
+    /// identity and therefore must never use the context-free dispatcher.
+    pub fn register_caller_bound(&mut self, service: RegisteredService) {
+        self.register_with_capability(service, DispatchCapability::CallerBound);
+    }
+
+    /// Register a service whose adapter requires HTTP request state and must
+    /// therefore not be advertised by MCP or an in-process peer.
+    pub fn register_http_context_only(&mut self, service: RegisteredService) {
+        self.register_with_capability(service, DispatchCapability::HttpContextOnly);
+    }
+
+    fn register_with_capability(
+        &mut self,
+        service: RegisteredService,
+        capability: DispatchCapability,
+    ) {
         debug_assert!(
             service.status == "available" || service.status == "stub",
             "service '{}': unknown status '{}'; expected \"available\" or \"stub\"",
@@ -195,6 +219,7 @@ impl ToolRegistry {
                 self.action_names.insert(index, action.name);
             }
         }
+        self.dispatch_capabilities.push((service.name, capability));
         self.services.push(service);
     }
 
@@ -237,6 +262,26 @@ impl ToolRegistry {
     pub fn service(&self, name: &str) -> Option<&RegisteredService> {
         self.services.iter().find(|service| service.name == name)
     }
+
+    #[must_use]
+    pub fn dispatch_capability(&self, name: &str) -> Option<DispatchCapability> {
+        self.dispatch_capabilities
+            .iter()
+            .find_map(|(service, capability)| (*service == name).then_some(*capability))
+    }
+
+    #[must_use]
+    pub fn supports_context_free_dispatch(&self, name: &str) -> bool {
+        self.dispatch_capability(name) == Some(DispatchCapability::ContextFree)
+    }
+
+    #[must_use]
+    pub fn supports_mcp_dispatch(&self, name: &str) -> bool {
+        matches!(
+            self.dispatch_capability(name),
+            Some(DispatchCapability::ContextFree | DispatchCapability::CallerBound)
+        )
+    }
 }
 
 // === labby-gateway in-process peer seam ===
@@ -268,6 +313,11 @@ impl labby_gateway::registry::InProcessServiceRegistry for ToolRegistry {
     fn in_process_services(&self) -> Vec<Box<dyn labby_gateway::registry::InProcessService>> {
         self.services
             .iter()
+            // A serialized in-process peer cannot carry host-local caller
+            // identity by construction. Caller-bound adapters stay on the
+            // authenticated outer MCP surface instead of being silently
+            // downgraded to their context-free fallback.
+            .filter(|service| self.supports_context_free_dispatch(service.name))
             .cloned()
             .map(
                 |service| -> Box<dyn labby_gateway::registry::InProcessService> {
@@ -345,7 +395,15 @@ pub fn filter_by_configured_env(registry: &ToolRegistry) -> ToolRegistry {
     let mut filtered = ToolRegistry::new();
     for service in registry.services() {
         if service_visible_with_env(service.name) {
-            filtered.register(service.clone());
+            match registry.dispatch_capability(service.name) {
+                Some(DispatchCapability::CallerBound) => {
+                    filtered.register_caller_bound(service.clone())
+                }
+                Some(DispatchCapability::HttpContextOnly) => {
+                    filtered.register_http_context_only(service.clone())
+                }
+                _ => filtered.register(service.clone()),
+            }
         }
     }
     filtered
@@ -415,7 +473,13 @@ pub fn filter_built_in_upstream_apis(registry: ToolRegistry, enabled: bool) -> T
             if service.name == "artifacts" {
                 service.actions = &crate::dispatch::skill_library::catalog::LOCAL_ACTIONS;
             }
-            filtered.register(service);
+            match registry.dispatch_capability(service.name) {
+                Some(DispatchCapability::CallerBound) => filtered.register_caller_bound(service),
+                Some(DispatchCapability::HttpContextOnly) => {
+                    filtered.register_http_context_only(service)
+                }
+                _ => filtered.register(service),
+            }
         }
     }
     filtered
@@ -505,7 +569,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
     ));
 
     #[cfg(feature = "skills")]
-    reg.register(RegisteredService::built_in_upstream_api(
+    reg.register_http_context_only(RegisteredService::built_in_upstream_api(
         "bundles",
         "Curate and publish immutable Artifact bundles",
         "bootstrap",
@@ -514,7 +578,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
     ));
 
     #[cfg(feature = "skills")]
-    reg.register(RegisteredService::built_in_upstream_api(
+    reg.register_http_context_only(RegisteredService::built_in_upstream_api(
         "jobs",
         "Run and inspect durable Artifact ingestion jobs",
         "bootstrap",
@@ -523,7 +587,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
     ));
 
     #[cfg(feature = "skills")]
-    reg.register(RegisteredService::built_in_upstream_api(
+    reg.register_http_context_only(RegisteredService::built_in_upstream_api(
         "sources",
         "Manage remote Artifact ingestion sources",
         "bootstrap",
@@ -532,7 +596,7 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
     ));
 
     #[cfg(feature = "skills")]
-    reg.register(RegisteredService::built_in_upstream_api(
+    reg.register_http_context_only(RegisteredService::built_in_upstream_api(
         "uploads",
         "Manage staged Artifact ingestion uploads",
         "bootstrap",
@@ -606,6 +670,19 @@ fn build_registry(apply_runtime_conditions: bool) -> ToolRegistry {
         dispatch_fn!(crate::mcp::services::fs::dispatch),
     ));
 
+    // Static documentation describes every compiled product surface and must
+    // not drift with the host that generated it. The live registry remains
+    // fail-closed on platforms without descriptor-relative filesystem support.
+    if !apply_runtime_conditions || cfg!(target_os = "linux") {
+        reg.register_caller_bound(RegisteredService::bootstrap_operator(
+            crate::dispatch::file_stash::META.0,
+            crate::dispatch::file_stash::META.1,
+            crate::dispatch::file_stash::META.2,
+            crate::dispatch::file_stash::ACTIONS,
+            dispatch_fn!(crate::dispatch::file_stash::dispatch),
+        ));
+    }
+
     reg
 }
 
@@ -663,10 +740,11 @@ mod tests {
         RegisteredService, RegisteredServiceKind, ToolRegistry, build_default_registry,
         filter_built_in_upstream_apis, is_built_in_upstream_api_service, service_meta,
     };
+    use crate::dispatch::error::ToolError;
     use labby_primitives::action::ActionSpec;
     use serde_json::Value;
-    use std::future::Future;
     use std::time::Duration;
+    use std::{future::Future, pin::Pin};
 
     #[test]
     fn all_features_registers_all_services() {
@@ -674,6 +752,53 @@ mod tests {
         let names: Vec<&str> = reg.services().iter().map(|s| s.name).collect();
         assert!(!names.contains(&"extract"), "extract has been retired");
         // feature-gated services — present only when the flag is enabled
+    }
+
+    #[test]
+    fn dispatch_capability_is_explicit_and_not_service_name_inferred() {
+        fn dispatch(
+            _: String,
+            _: Value,
+        ) -> Pin<Box<dyn Future<Output = Result<Value, ToolError>> + Send>> {
+            Box::pin(async { Ok(Value::Null) })
+        }
+        static ACTIONS: &[ActionSpec] = &[ActionSpec {
+            name: "probe.read",
+            description: "probe",
+            destructive: false,
+            requires_admin: false,
+            params: &[],
+            returns: "null",
+        }];
+        let service = |name: &'static str| {
+            RegisteredService::bootstrap_operator(name, "probe", "bootstrap", ACTIONS, dispatch)
+        };
+        let mut registry = ToolRegistry::new();
+        registry.register(service("ordinary-name"));
+        registry.register_caller_bound(service("another-ordinary-name"));
+        registry.register_http_context_only(service("http-only-name"));
+        assert!(registry.supports_context_free_dispatch("ordinary-name"));
+        assert!(registry.supports_mcp_dispatch("ordinary-name"));
+        assert_eq!(
+            registry.dispatch_capability("another-ordinary-name"),
+            Some(super::DispatchCapability::CallerBound)
+        );
+        assert!(!registry.supports_context_free_dispatch("another-ordinary-name"));
+        assert!(registry.supports_mcp_dispatch("another-ordinary-name"));
+        assert_eq!(
+            registry.dispatch_capability("http-only-name"),
+            Some(super::DispatchCapability::HttpContextOnly)
+        );
+        assert!(!registry.supports_mcp_dispatch("http-only-name"));
+        #[cfg(feature = "gateway")]
+        {
+            use labby_gateway::registry::InProcessServiceRegistry as _;
+            assert_eq!(registry.in_process_services().len(), 1);
+            assert_eq!(
+                registry.in_process_services()[0].service_name(),
+                "ordinary-name"
+            );
+        }
     }
 
     #[test]
@@ -797,12 +922,17 @@ mod tests {
 
     #[test]
     fn retired_services_never_register() {
-        for retired in ["acp", "device", "deploy", "marketplace", "stash"] {
+        for retired in ["acp", "device", "deploy", "marketplace"] {
             assert!(
                 !registry_has_service(retired),
                 "{retired} has been retired from the gateway host"
             );
         }
+    }
+
+    #[test]
+    fn stash_registration_matches_descriptor_relative_platform_support() {
+        assert_eq!(registry_has_service("stash"), cfg!(target_os = "linux"));
     }
 
     /// Guard that the MCP registry and the HTTP router mount identical service sets.
@@ -825,6 +955,8 @@ mod tests {
             s.insert(crate::dispatch::setup::META.name); // always-on
             #[cfg(feature = "fs")]
             s.insert("fs");
+            #[cfg(target_os = "linux")]
+            s.insert("stash");
             s
         };
 
@@ -895,9 +1027,7 @@ mod tests {
     fn noop_dispatch(
         _action: String,
         _params: Value,
-    ) -> std::pin::Pin<
-        Box<dyn Future<Output = Result<Value, crate::dispatch::error::ToolError>> + Send>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<Value, ToolError>> + Send>> {
         Box::pin(async { Ok(Value::Null) })
     }
 

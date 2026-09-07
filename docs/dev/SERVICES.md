@@ -53,6 +53,7 @@ Do not add an empty Cargo feature as a placeholder for a future product.
 ## Retired Services
 
 ACP, ACP Registry, the in-product MCP Registry browser/client, Marketplace,
-Fleet/device runtime, Deploy-product, and Stash are not current services or SDK
-modules. Historical implementation contracts are archived under
+Fleet/device runtime, Deploy-product, and the old Agent Artifact Manager named
+Stash are not current services or SDK modules. The principal-scoped File Stash
+is a distinct current Linux service. Historical implementation contracts are archived under
 [../archive/retired-labby](../archive/retired-labby/).

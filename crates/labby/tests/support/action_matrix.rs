@@ -3,11 +3,11 @@ use std::sync::OnceLock;
 
 use serde::Deserialize;
 
-pub(crate) const EXPECTED_ACTIONS: usize = 213;
+pub(crate) const EXPECTED_ACTIONS: usize = 224;
 pub(crate) const EXPECTED_CLI_ACTIONS: usize = 76;
-pub(crate) const EXPECTED_MCP_ACTIONS: usize = 212;
-pub(crate) const EXPECTED_API_ACTIONS: usize = 210;
-pub(crate) const EXPECTED_WEB_ACTIONS: usize = 114;
+pub(crate) const EXPECTED_MCP_ACTIONS: usize = 223;
+pub(crate) const EXPECTED_API_ACTIONS: usize = 221;
+pub(crate) const EXPECTED_WEB_ACTIONS: usize = 122;
 pub(crate) const EXPECTED_SHARED_CLI_MCP_API_ACTIONS: usize = 76;
 
 const INTENT_JSON: &str = include_str!("../fixtures/action_cases.json");
@@ -395,6 +395,7 @@ fn approved_fixture(name: &str) -> bool {
             | "skills"
             | "snippets"
             | "sources"
+            | "stash"
             | "uploads"
     ) && matches!(purpose, "readonly" | "workflow" | "destructive")
 }

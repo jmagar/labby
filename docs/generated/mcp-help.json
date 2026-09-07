@@ -5,6 +5,7 @@
       "description": "Bridge browser-native WebMCP tools into Labby",
       "category": "bootstrap",
       "status": "available",
+      "caller_bound": false,
       "requires_http_subject": false,
       "actions": [
         {
@@ -201,6 +202,7 @@
       "description": "Manage proxied upstream MCP gateways",
       "category": "bootstrap",
       "status": "available",
+      "caller_bound": false,
       "requires_http_subject": false,
       "actions": [
         {
@@ -2001,6 +2003,7 @@
       "description": "Comprehensive health audit: env vars, system, access store, gateway, and OAuth relay checks",
       "category": "bootstrap",
       "status": "available",
+      "caller_bound": false,
       "requires_http_subject": false,
       "actions": [
         {
@@ -2139,6 +2142,7 @@
       "description": "First-run + draft-commit configuration flow",
       "category": "bootstrap",
       "status": "available",
+      "caller_bound": false,
       "requires_http_subject": false,
       "actions": [
         {
@@ -2632,6 +2636,7 @@
       "description": "Search, import, revise, validate, and activate durable Artifacts",
       "category": "bootstrap",
       "status": "available",
+      "caller_bound": false,
       "requires_http_subject": false,
       "actions": [
         {
@@ -3604,6 +3609,7 @@
       "description": "Curate and publish immutable Artifact bundles",
       "category": "bootstrap",
       "status": "available",
+      "caller_bound": false,
       "requires_http_subject": false,
       "actions": [
         {
@@ -3837,6 +3843,7 @@
       "description": "Run and inspect durable Artifact ingestion jobs",
       "category": "bootstrap",
       "status": "available",
+      "caller_bound": false,
       "requires_http_subject": false,
       "actions": [
         {
@@ -3978,6 +3985,7 @@
       "description": "Manage remote Artifact ingestion sources",
       "category": "bootstrap",
       "status": "available",
+      "caller_bound": false,
       "requires_http_subject": false,
       "actions": [
         {
@@ -4087,6 +4095,7 @@
       "description": "Manage staged Artifact ingestion uploads",
       "category": "bootstrap",
       "status": "available",
+      "caller_bound": false,
       "requires_http_subject": false,
       "actions": [
         {
@@ -4168,6 +4177,7 @@
       "description": "Manage executable Code Mode snippets",
       "category": "bootstrap",
       "status": "available",
+      "caller_bound": false,
       "requires_http_subject": false,
       "actions": [
         {
@@ -4403,6 +4413,7 @@
       "description": "View and filter Labby's own rolling server process logs",
       "category": "bootstrap",
       "status": "available",
+      "caller_bound": false,
       "requires_http_subject": false,
       "actions": [
         {
@@ -4515,6 +4526,7 @@
       "description": "Internal onboarding audit tool",
       "category": "bootstrap",
       "status": "available",
+      "caller_bound": false,
       "requires_http_subject": false,
       "actions": [
         {
@@ -4565,6 +4577,7 @@
       "description": "Workspace filesystem browser (read-only, deny-listed)",
       "category": "bootstrap",
       "status": "available",
+      "caller_bound": false,
       "requires_http_subject": false,
       "actions": [
         {
@@ -4582,6 +4595,201 @@
             }
           ],
           "returns": "{entries: [{name, path, kind, size, modified, accessible}], truncated: bool}"
+        }
+      ]
+    },
+    {
+      "name": "stash",
+      "description": "Store and share principal-scoped files",
+      "category": "bootstrap",
+      "status": "available",
+      "caller_bound": true,
+      "requires_http_subject": false,
+      "actions": [
+        {
+          "name": "stash.list",
+          "description": "List files available to the caller",
+          "destructive": false,
+          "requires_admin": false,
+          "required_scopes": [],
+          "params": [
+            {
+              "name": "cursor",
+              "ty": "string",
+              "required": false,
+              "description": "Opaque continuation cursor"
+            },
+            {
+              "name": "limit",
+              "ty": "integer",
+              "required": false,
+              "description": "Page size from 1 to the configured maximum"
+            }
+          ],
+          "returns": "FilePage"
+        },
+        {
+          "name": "stash.search",
+          "description": "Search available files by display name",
+          "destructive": false,
+          "requires_admin": false,
+          "required_scopes": [],
+          "params": [
+            {
+              "name": "query",
+              "ty": "string",
+              "required": true,
+              "description": "Case-insensitive display-name substring"
+            },
+            {
+              "name": "cursor",
+              "ty": "string",
+              "required": false,
+              "description": "Opaque continuation cursor"
+            },
+            {
+              "name": "limit",
+              "ty": "integer",
+              "required": false,
+              "description": "Page size from 1 to the configured maximum"
+            }
+          ],
+          "returns": "FilePage"
+        },
+        {
+          "name": "stash.stats",
+          "description": "Read authoritative owned-file usage",
+          "destructive": false,
+          "requires_admin": false,
+          "required_scopes": [],
+          "params": [],
+          "returns": "StashStats"
+        },
+        {
+          "name": "stash.metadata",
+          "description": "Read metadata for an available file",
+          "destructive": false,
+          "requires_admin": false,
+          "required_scopes": [],
+          "params": [
+            {
+              "name": "file_id",
+              "ty": "string",
+              "required": true,
+              "description": "Opaque immutable file ID"
+            }
+          ],
+          "returns": "StashFile"
+        },
+        {
+          "name": "stash.rename",
+          "description": "Rename an owned file",
+          "destructive": false,
+          "requires_admin": false,
+          "required_scopes": [],
+          "params": [
+            {
+              "name": "file_id",
+              "ty": "string",
+              "required": true,
+              "description": "Opaque immutable file ID"
+            },
+            {
+              "name": "display_name",
+              "ty": "string",
+              "required": true,
+              "description": "New display filename"
+            }
+          ],
+          "returns": "StashFile"
+        },
+        {
+          "name": "stash.delete",
+          "description": "Permanently delete an owned file",
+          "destructive": true,
+          "requires_admin": false,
+          "required_scopes": [],
+          "params": [
+            {
+              "name": "file_id",
+              "ty": "string",
+              "required": true,
+              "description": "Opaque immutable file ID"
+            }
+          ],
+          "returns": "Deleted"
+        },
+        {
+          "name": "stash.grants.create",
+          "description": "Grant one principal read access to an owned file",
+          "destructive": false,
+          "requires_admin": false,
+          "required_scopes": [],
+          "params": [
+            {
+              "name": "file_id",
+              "ty": "string",
+              "required": true,
+              "description": "Opaque immutable file ID"
+            },
+            {
+              "name": "grantee_principal_id",
+              "ty": "string",
+              "required": true,
+              "description": "AccessStore-resolved durable PrincipalId"
+            }
+          ],
+          "returns": "StashGrant"
+        },
+        {
+          "name": "stash.grants.list",
+          "description": "List active grants for an owned file",
+          "destructive": false,
+          "requires_admin": false,
+          "required_scopes": [],
+          "params": [
+            {
+              "name": "file_id",
+              "ty": "string",
+              "required": true,
+              "description": "Opaque immutable file ID"
+            },
+            {
+              "name": "cursor",
+              "ty": "string",
+              "required": false,
+              "description": "Opaque continuation cursor"
+            },
+            {
+              "name": "limit",
+              "ty": "integer",
+              "required": false,
+              "description": "Page size from 1 to the configured maximum"
+            }
+          ],
+          "returns": "GrantPage"
+        },
+        {
+          "name": "stash.grants.revoke",
+          "description": "Revoke an active grant on an owned file",
+          "destructive": false,
+          "requires_admin": false,
+          "required_scopes": [],
+          "params": [
+            {
+              "name": "file_id",
+              "ty": "string",
+              "required": true,
+              "description": "Opaque immutable file ID"
+            },
+            {
+              "name": "grant_id",
+              "ty": "string",
+              "required": true,
+              "description": "Opaque grant ID"
+            }
+          ],
+          "returns": "Revoked"
         }
       ]
     }

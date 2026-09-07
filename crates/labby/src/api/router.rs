@@ -424,6 +424,14 @@ fn build_v1_router(
     );
     v1 = v1.nest("/catalog", services::catalog::routes(state.clone()));
     v1 = v1.nest("/depot", services::depot::routes(state.clone()));
+    #[cfg(target_os = "linux")]
+    if api_auth_configured
+        && state.enabled_services.contains("stash")
+        && state.registry.dispatch_capability("stash")
+            == Some(crate::registry::DispatchCapability::CallerBound)
+    {
+        v1 = v1.nest("/stash", services::file_stash::routes(state.clone()));
+    }
     if api_auth_configured && !integrated_trusted_host {
         v1 = v1.nest("/browser", services::browser::routes(state.clone()));
         v1 = v1.nest(
@@ -1355,6 +1363,38 @@ mod tests {
 
     use super::*;
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn supported_platform_mounts_caller_bound_stash_only_with_api_auth() {
+        let state = AppState::new();
+        let mounted = build_v1_router(&state, true, false);
+        assert!(
+            mounted
+                .descriptors
+                .iter()
+                .any(|route| route.mount == "stash")
+        );
+        let unauthenticated = build_v1_router(&state, false, false);
+        assert!(
+            unauthenticated
+                .descriptors
+                .iter()
+                .all(|route| route.mount != "stash")
+        );
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn unsupported_platform_does_not_mount_stash() {
+        let routes = build_v1_router(&AppState::new(), true, false);
+        assert!(
+            routes
+                .descriptors
+                .iter()
+                .all(|route| route.mount != "stash")
+        );
+    }
+
     /// One representative dispatch route for every registry-backed HTTP service.
     ///
     /// The registry is the denominator: adding a service without classifying its
@@ -1365,6 +1405,7 @@ mod tests {
         let path = match service {
             "lab_admin" => return None,
             "fs" => "/v1/fs/list".to_string(),
+            "stash" => "/v1/stash/stats".to_string(),
             name @ ("artifacts" | "browser" | "bundles" | "doctor" | "gateway" | "jobs"
             | "server_logs" | "setup" | "snippets" | "sources" | "uploads") => {
                 format!("/v1/{name}")
@@ -1373,7 +1414,7 @@ mod tests {
                 "registered service `{unknown}` has no reviewed HTTP auth probe; add its mounted dispatch route or explicitly classify it as MCP-only"
             ),
         };
-        let method = if service == "fs" {
+        let method = if matches!(service, "fs" | "stash") {
             Method::GET
         } else {
             Method::POST

@@ -266,6 +266,7 @@ async fn actual_http_adapter_rejects_hostile_callback_transports_with_safe_corre
     let server = LabMcpServer {
         registry: Arc::new(crate::registry::build_default_registry()),
         access_runtime: Arc::new(crate::access::AccessRuntime::blocked_unavailable()),
+        file_stash_runtime: Arc::new(crate::file_stash::FileStashRuntime::blocked()),
         #[cfg(feature = "gateway")]
         gateway_manager: None,
         peers: Default::default(),
@@ -497,6 +498,7 @@ async fn authenticated_http_call_tool_reaches_process_library_for_read_and_mutat
     let server = LabMcpServer {
         registry: Arc::new(crate::registry::build_default_registry()),
         access_runtime: Arc::clone(&access_runtime),
+        file_stash_runtime: Arc::new(crate::file_stash::FileStashRuntime::blocked()),
         #[cfg(feature = "gateway")]
         gateway_manager: None,
         peers: Default::default(),
@@ -925,6 +927,7 @@ async fn explicit_mcp_action_allowlist_permits_list_and_denies_create() {
     let server = LabMcpServer {
         registry: Arc::new(crate::registry::build_default_registry()),
         access_runtime: Arc::new(crate::access::AccessRuntime::blocked_unavailable()),
+        file_stash_runtime: Arc::new(crate::file_stash::FileStashRuntime::blocked()),
         gateway_manager: Some(manager),
         peers: Default::default(),
         code_mode_app_state: Default::default(),

@@ -502,6 +502,10 @@ pub fn build_route_descriptors() -> Vec<RouteDescriptor> {
     }
     #[cfg(feature = "fs")]
     routes.extend(prefixed("/v1/fs", crate::api::services::fs::descriptors()));
+    routes.extend(prefixed(
+        "/v1/stash",
+        crate::api::services::file_stash::descriptors(),
+    ));
     #[cfg(feature = "gateway")]
     {
         routes.extend(prefixed(

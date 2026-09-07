@@ -74,6 +74,7 @@ pub(crate) struct LiveIdentity {
     proof: String,
     manifest: Value,
     credential: String,
+    static_token: String,
     seeded_canary: String,
     retained_evidence: std::path::PathBuf,
     pub(crate) prepare_id: String,
@@ -169,7 +170,7 @@ impl LiveIdentity {
         let mut guard = LiveLabbyBuilder::new()
             .existing_root(&root)
             .config(policy_text)
-            .env("LABBY_MCP_HTTP_TOKEN", static_token)
+            .env("LABBY_MCP_HTTP_TOKEN", &static_token)
             .env("LABBY_WEB_UI_AUTH_DISABLED", "false")
             .env("LABBY_PUBLIC_URL", format!("https://{issuer_host}"))
             .env("LABBY_IDENTITY_CANARY", &seeded_canary)
@@ -243,6 +244,7 @@ impl LiveIdentity {
             proof,
             manifest,
             credential,
+            static_token,
             seeded_canary,
             retained_evidence,
             prepare_id: prepare_id.clone(),
@@ -255,6 +257,24 @@ impl LiveIdentity {
     pub(crate) fn root(&self) -> &Path {
         self.owned.path()
     }
+
+    /// Provision an active same-organization Stash recipient through the
+    /// shared live-identity fixture boundary. Tests should not duplicate the
+    /// access-store schema or bootstrap-owner identifiers.
+    pub(crate) async fn provision_stash_recipient(
+        &self,
+        principal_id: &str,
+        display_name: &str,
+    ) -> Result<(), String> {
+        labby::testkit::provision_file_stash_recipient(
+            self.root().join("labby-home/access.db"),
+            self.identity.credential_id.clone(),
+            principal_id.to_owned(),
+            display_name.to_owned(),
+            "static-bearer:primary".to_owned(),
+        )
+        .await
+    }
     pub(crate) fn base(&self) -> &str {
         &self
             .guard
@@ -265,6 +285,9 @@ impl LiveIdentity {
     }
     pub(crate) fn credential_for_request(&self) -> &str {
         &self.credential
+    }
+    pub(crate) fn static_token_for_request(&self) -> &str {
+        &self.static_token
     }
     pub(crate) fn owned_ids(&self) -> &[String] {
         &self.journal

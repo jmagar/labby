@@ -41,6 +41,18 @@ pub(super) struct ResolvedPrincipal {
     pub(super) organization_id: String,
 }
 
+pub(super) fn resolve_principal_id(
+    connection: &mut Connection,
+    identity: &VerifiedIdentity,
+) -> AccessStoreResult<super::AccessPrincipalId> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Deferred)
+        .map_err(map_sqlite_error)?;
+    let principal = resolve_principal(&transaction, identity)?;
+    transaction.commit().map_err(map_sqlite_error)?;
+    Ok(super::AccessPrincipalId(principal.id))
+}
+
 pub(super) fn list_accessible_projects(
     connection: &mut Connection,
     identity: &VerifiedIdentity,

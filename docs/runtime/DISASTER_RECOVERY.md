@@ -61,6 +61,13 @@ recovery separately. Maintain at least one encrypted, access-controlled copy in
 a different failure domain. Apply retention appropriate to credential rotation
 and legal requirements, and securely expire obsolete copies.
 
+On supported platforms, an export includes both File Stash metadata and blobs
+when its root remains beneath `LABBY_HOME`. Export rejects an externally
+configured File Stash root because copying only the database or only the blob
+tree would not be a consistent backup. After restore, prove runtime readiness
+and byte integrity through an authenticated metadata lookup plus HTTP download;
+successful archive extraction alone is not File Stash recovery proof.
+
 RPO and RTO are operator policies, not implicit product promises. Choose an
 export schedule whose maximum interval meets the required recovery point
 objective; also export after credential, access-policy, gateway, or snippet

@@ -1591,7 +1591,19 @@ impl LabMcpServer {
                     .await
                     .map(Into::into);
             }
-            let result = if service == "artifacts" {
+            let result = if self.registry.dispatch_capability(&service)
+                == Some(crate::registry::DispatchCapability::CallerBound)
+                && !matches!(action.as_str(), "help" | "schema")
+            {
+                self.dispatch_caller_bound_service(
+                    &service,
+                    &action,
+                    params,
+                    &context,
+                    request.meta.as_ref(),
+                )
+                .await
+            } else if service == "artifacts" {
                 #[cfg(feature = "skills")]
                 {
                     self.dispatch_artifact_tool_boxed(

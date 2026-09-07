@@ -145,6 +145,7 @@ export function ConsoleHero({
                 <div
                   key={stat.label}
                   title={stat.label}
+                  data-console-hero-stat={stat.label}
                   style={{
                     minWidth: 0,
                     padding: '2px 12px',
@@ -180,6 +181,7 @@ export function ConsoleHero({
                     </span>
                   </div>
                   <div
+                    data-console-hero-stat-value="1"
                     style={{
                       marginTop: 6,
                       fontFamily: 'var(--font-display)',

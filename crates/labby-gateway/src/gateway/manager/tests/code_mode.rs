@@ -1728,6 +1728,7 @@ async fn palette_execute_rejects_cross_upstream_scope_and_destructive_reclassifi
                 "gateway:alpha".to_string(),
             ],
             trusted_local: false,
+            access_principal_id: None,
             private_context_token: None,
         },
         scope: ToolScope::scoped_namespaces(vec!["alpha".to_string()], Vec::new()),

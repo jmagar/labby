@@ -62,6 +62,7 @@ pub(crate) fn build_peer_server(service: &RegisteredService) -> LabMcpServer {
         // non-I/O blocked runtime so future enforcement cannot accidentally
         // treat this internal hop as an independently authoritative store.
         access_runtime: Arc::new(AccessRuntime::blocked_unavailable()),
+        file_stash_runtime: Arc::new(crate::file_stash::FileStashRuntime::blocked()),
         // Each of these INDEPENDENTLY closes the re-entrancy path:
         // `expose_code_mode: false` (below) short-circuits
         // `code_mode_visibility` to `Raw` before the manager is consulted, and

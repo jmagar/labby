@@ -33,6 +33,7 @@ The generated [service catalog](./generated/service-catalog.md) is authoritative
 | `setup` | [services/SETUP.md](./services/SETUP.md) | Bootstrap, settings, repair, plugin lifecycle, proxy setup, host provisioning |
 | `server_logs` | [services/SERVER_LOGS.md](./services/SERVER_LOGS.md) | Labby's own server-process log query and journal tail |
 | `fs` | [services/FILESYSTEM.md](./services/FILESYSTEM.md) | Optional jailed read-only workspace browsing and preview |
+| `stash` | [services/STASH.md](./services/STASH.md) | Linux principal-scoped file upload, download, sharing, and bounded MCP reads |
 | `snippets` | [services/SNIPPETS.md](./services/SNIPPETS.md) | Reusable Code Mode workflow storage, validation, execution, testing, promotion |
 | `artifacts`, `bundles`, `jobs`, `sources`, `uploads` | [services/SKILLS.md](./services/SKILLS.md) and [artifacts/](./artifacts/) | Durable Artifact library, provider-backed control-plane projections, and native Agent Skills projection |
 | `lab_admin` | [services/LAB_ADMIN.md](./services/LAB_ADMIN.md) | Runtime-conditional onboarding audit surface |

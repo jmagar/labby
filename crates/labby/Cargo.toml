@@ -60,6 +60,7 @@ rustls.workspace = true
 url.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
+percent-encoding.workspace = true
 serde_yaml_ng.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
@@ -120,8 +121,9 @@ tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 # optional — fs feature (workspace filesystem browser)
 walkdir = { version = "2", optional = true }
 globset = { version = "0.4", optional = true }
-unicode-normalization = { version = "0.1", optional = true }
-rustix = { version = "1", features = ["fs"] }
+unicode-normalization = { workspace = true }
+unicode-casefold = { workspace = true }
+rustix = { version = "1", features = ["fs", "process"] }
 toml_edit = "0.23"
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -185,7 +187,7 @@ api-docs = ["dep:utoipa"]
 # Agent Skills flow through `gateway`, so both plain production builds and
 # explicit gateway feature slices cannot ship a disabled Skills surface.
 default = ["gateway-host"]
-fs = ["dep:walkdir", "dep:globset", "dep:unicode-normalization"]
+fs = ["dep:walkdir", "dep:globset"]
 lab-admin = []
 # Agent Skills over MCP (SEP-2640). `labby-gateway?/skills` is a WEAK dependency
 # feature: it enables skills support in labby-gateway only when that optional

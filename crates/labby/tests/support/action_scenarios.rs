@@ -161,6 +161,7 @@ pub(crate) fn fixtures() -> BTreeMap<String, ServiceFixture> {
         include_str!("../fixtures/e2e_actions/server_logs.json"),
         include_str!("../fixtures/e2e_actions/setup.json"),
         include_str!("../fixtures/e2e_actions/snippets.json"),
+        include_str!("../fixtures/e2e_actions/stash.json"),
         include_str!("../fixtures/e2e_actions/artifacts.json"),
         include_str!("../fixtures/e2e_actions/sources.json"),
         include_str!("../fixtures/e2e_actions/jobs.json"),
@@ -441,11 +442,42 @@ pub(crate) fn dedicated_contract_accepts_for(
     surface: Surface,
     error_kind: &str,
 ) -> bool {
+    // The isolated MCP runner can fail at either side of the same missing
+    // durable-principal boundary: the Linux peer can be denied before
+    // resolution, Depot can be unreachable, or Stash can map the unavailable
+    // authority. These are stable errors; the authenticated restart journey
+    // supplies the success evidence.
+    if key.starts_with("stash:") && surface == Surface::Mcp {
+        return matches!(
+            error_kind,
+            "forbidden" | "upstream_connect_error" | "service_unavailable"
+        );
+    }
     dedicated_contract_for(key, surface)
         .is_some_and(|(_, expected_kind)| error_kind == expected_kind)
 }
 
 fn dedicated_contract_for(key: &str, surface: Surface) -> Option<(&'static str, &'static str)> {
+    if key.starts_with("stash:") {
+        return if surface == Surface::Mcp {
+            Some((
+                "requires_durable_principal_link_covered_by_restart_journey",
+                "upstream_connect_error",
+            ))
+        } else if cfg!(target_os = "linux") && surface == Surface::Api {
+            Some((
+                "requires_durable_principal_link_covered_by_restart_journey",
+                "service_unavailable",
+            ))
+        } else if surface == Surface::Api {
+            Some((
+                "requires_descriptor_relative_filesystem_platform",
+                "route_not_found",
+            ))
+        } else {
+            None
+        };
+    }
     if key == "gateway:gateway.skills.list" && !cfg!(feature = "skills") {
         return Some(("requires_skills_runtime", "feature_not_compiled"));
     }
@@ -546,7 +578,26 @@ fn dedicated_contract_for(key: &str, surface: Surface) -> Option<(&'static str, 
 
 #[cfg(test)]
 mod dedicated_contract_tests {
-    use super::{dedicated_contract, dedicated_contract_accepts, dedicated_contract_reason};
+    use super::{
+        Surface, dedicated_contract, dedicated_contract_accepts, dedicated_contract_accepts_for,
+        dedicated_contract_reason,
+    };
+
+    #[test]
+    fn stash_mcp_accepts_both_missing_authority_layers() {
+        for kind in ["forbidden", "upstream_connect_error", "service_unavailable"] {
+            assert!(dedicated_contract_accepts_for(
+                "stash:stash.list",
+                Surface::Mcp,
+                kind
+            ));
+        }
+        assert!(!dedicated_contract_accepts_for(
+            "stash:stash.list",
+            Surface::Mcp,
+            "internal_error"
+        ));
+    }
 
     #[test]
     fn every_dedicated_contract_accepts_only_its_exact_error_kind() {

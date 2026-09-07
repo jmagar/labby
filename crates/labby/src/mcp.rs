@@ -21,6 +21,7 @@ pub mod context;
 pub mod elicitation;
 pub mod envelope;
 pub mod error;
+pub(crate) mod file_stash;
 pub mod handlers_prompts;
 pub mod handlers_resources;
 pub mod handlers_tools;

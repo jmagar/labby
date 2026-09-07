@@ -6246,5 +6246,93 @@
     "exclusion_reason": null,
     "persistence_class": "none",
     "scenario_owner": "optional_external_runner"
+  },
+  {
+    "service": "stash", "action": "help", "canonical_action": null,
+    "applicable_surfaces": ["mcp", "api"],
+    "applicable_features": ["all", "api-docs", "base", "default", "fs", "gateway-host", "lab-admin", "no-default", "skills"],
+    "scenario_kind": "contract_probe", "scenario_id": "contract_probe::stash::help", "minimum_evidence": "metadata_only",
+    "setup_ref": "catalog-only", "fixture_params": {"fixture": "catalog_metadata", "parameters": {}},
+    "required": true, "exclusion_reason": null, "persistence_class": "reconstructed", "scenario_owner": "catalog_governance"
+  },
+  {
+    "service": "stash", "action": "schema", "canonical_action": null,
+    "applicable_surfaces": ["mcp", "api"],
+    "applicable_features": ["all", "api-docs", "base", "default", "fs", "gateway-host", "lab-admin", "no-default", "skills"],
+    "scenario_kind": "contract_probe", "scenario_id": "contract_probe::stash::schema", "minimum_evidence": "metadata_only",
+    "setup_ref": "catalog-only", "fixture_params": {"fixture": "catalog_metadata", "parameters": {"action": "$fixture.action"}},
+    "required": true, "exclusion_reason": null, "persistence_class": "reconstructed", "scenario_owner": "catalog_governance"
+  },
+  {
+    "service": "stash", "action": "stash.list", "canonical_action": null,
+    "applicable_surfaces": ["mcp", "api", "web_ui"],
+    "applicable_features": ["all", "api-docs", "base", "default", "fs", "gateway-host", "lab-admin", "no-default", "skills"],
+    "scenario_kind": "live_invoke", "scenario_id": "live_invoke::stash::stash_list", "minimum_evidence": "live_success",
+    "setup_ref": "disposable-home", "fixture_params": {"fixture": "isolated_stash_readonly", "parameters": {}},
+    "required": true, "exclusion_reason": null, "persistence_class": "durable", "scenario_owner": "surface_action_runner"
+  },
+  {
+    "service": "stash", "action": "stash.search", "canonical_action": null,
+    "applicable_surfaces": ["mcp", "api", "web_ui"],
+    "applicable_features": ["all", "api-docs", "base", "default", "fs", "gateway-host", "lab-admin", "no-default", "skills"],
+    "scenario_kind": "live_invoke", "scenario_id": "live_invoke::stash::stash_search", "minimum_evidence": "live_success",
+    "setup_ref": "disposable-home", "fixture_params": {"fixture": "isolated_stash_readonly", "parameters": {"query": "$fixture.query"}},
+    "required": true, "exclusion_reason": null, "persistence_class": "durable", "scenario_owner": "surface_action_runner"
+  },
+  {
+    "service": "stash", "action": "stash.stats", "canonical_action": null,
+    "applicable_surfaces": ["mcp", "api", "web_ui"],
+    "applicable_features": ["all", "api-docs", "base", "default", "fs", "gateway-host", "lab-admin", "no-default", "skills"],
+    "scenario_kind": "live_invoke", "scenario_id": "live_invoke::stash::stash_stats", "minimum_evidence": "live_success",
+    "setup_ref": "disposable-home", "fixture_params": {"fixture": "isolated_stash_readonly", "parameters": {}},
+    "required": true, "exclusion_reason": null, "persistence_class": "durable", "scenario_owner": "surface_action_runner"
+  },
+  {
+    "service": "stash", "action": "stash.metadata", "canonical_action": null,
+    "applicable_surfaces": ["mcp", "api"],
+    "applicable_features": ["all", "api-docs", "base", "default", "fs", "gateway-host", "lab-admin", "no-default", "skills"],
+    "scenario_kind": "live_invoke", "scenario_id": "live_invoke::stash::stash_metadata", "minimum_evidence": "live_success",
+    "setup_ref": "disposable-home", "fixture_params": {"fixture": "isolated_stash_readonly", "parameters": {"file_id": "$fixture.file_id"}},
+    "required": true, "exclusion_reason": null, "persistence_class": "durable", "scenario_owner": "surface_action_runner"
+  },
+  {
+    "service": "stash", "action": "stash.rename", "canonical_action": null,
+    "applicable_surfaces": ["mcp", "api", "web_ui"],
+    "applicable_features": ["all", "api-docs", "base", "default", "fs", "gateway-host", "lab-admin", "no-default", "skills"],
+    "scenario_kind": "stateful_scenario", "scenario_id": "stateful_scenario::stash::stash_rename", "minimum_evidence": "live_restart_persistence",
+    "setup_ref": "disposable-home", "fixture_params": {"fixture": "isolated_stash_workflow", "parameters": {"file_id": "$fixture.file_id", "display_name": "$fixture.display_name"}},
+    "required": true, "exclusion_reason": null, "persistence_class": "durable", "scenario_owner": "stateful_workflow_runner"
+  },
+  {
+    "service": "stash", "action": "stash.delete", "canonical_action": null,
+    "applicable_surfaces": ["mcp", "api", "web_ui"],
+    "applicable_features": ["all", "api-docs", "base", "default", "fs", "gateway-host", "lab-admin", "no-default", "skills"],
+    "scenario_kind": "destructive_isolated", "scenario_id": "destructive_isolated::stash::stash_delete", "minimum_evidence": "live_state_transition",
+    "setup_ref": "disposable-home", "fixture_params": {"fixture": "isolated_stash_destructive", "parameters": {"file_id": "$fixture.file_id"}},
+    "required": true, "exclusion_reason": null, "persistence_class": "durable", "scenario_owner": "stateful_workflow_runner"
+  },
+  {
+    "service": "stash", "action": "stash.grants.create", "canonical_action": null,
+    "applicable_surfaces": ["mcp", "api", "web_ui"],
+    "applicable_features": ["all", "api-docs", "base", "default", "fs", "gateway-host", "lab-admin", "no-default", "skills"],
+    "scenario_kind": "stateful_scenario", "scenario_id": "stateful_scenario::stash::stash_grants_create", "minimum_evidence": "cross_surface_parity",
+    "setup_ref": "disposable-home", "fixture_params": {"fixture": "isolated_stash_workflow", "parameters": {"file_id": "$fixture.file_id", "grantee_principal_id": "$fixture.grantee_principal_id"}},
+    "required": true, "exclusion_reason": null, "persistence_class": "durable", "scenario_owner": "stateful_workflow_runner"
+  },
+  {
+    "service": "stash", "action": "stash.grants.list", "canonical_action": null,
+    "applicable_surfaces": ["mcp", "api", "web_ui"],
+    "applicable_features": ["all", "api-docs", "base", "default", "fs", "gateway-host", "lab-admin", "no-default", "skills"],
+    "scenario_kind": "stateful_scenario", "scenario_id": "stateful_scenario::stash::stash_grants_list", "minimum_evidence": "cross_surface_parity",
+    "setup_ref": "disposable-home", "fixture_params": {"fixture": "isolated_stash_workflow", "parameters": {"file_id": "$fixture.file_id"}},
+    "required": true, "exclusion_reason": null, "persistence_class": "durable", "scenario_owner": "stateful_workflow_runner"
+  },
+  {
+    "service": "stash", "action": "stash.grants.revoke", "canonical_action": null,
+    "applicable_surfaces": ["mcp", "api", "web_ui"],
+    "applicable_features": ["all", "api-docs", "base", "default", "fs", "gateway-host", "lab-admin", "no-default", "skills"],
+    "scenario_kind": "stateful_scenario", "scenario_id": "stateful_scenario::stash::stash_grants_revoke", "minimum_evidence": "cross_surface_parity",
+    "setup_ref": "disposable-home", "fixture_params": {"fixture": "isolated_stash_workflow", "parameters": {"file_id": "$fixture.file_id", "grant_id": "$fixture.grant_id"}},
+    "required": true, "exclusion_reason": null, "persistence_class": "durable", "scenario_owner": "stateful_workflow_runner"
   }
 ]

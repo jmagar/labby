@@ -417,10 +417,7 @@ impl PeerContract {
     }
 
     pub(crate) async fn service_visible_on_mcp(&self, service: &str) -> bool {
-        if self
-            .registry
-            .service(service)
-            .is_some_and(|registered| !crate::registry::supports_context_free_dispatch(registered))
+        if self.registry.service(service).is_some() && !self.registry.supports_mcp_dispatch(service)
         {
             return false;
         }

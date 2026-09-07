@@ -553,6 +553,13 @@ fn configured_external_files(paths: &InstallationPaths) -> Result<Vec<PathBuf>> 
     }
     if paths.config_toml().is_file() {
         let config: crate::config::LabConfig = crate::config::load_toml(&[paths.config_toml()])?;
+        if config.file_stash.root.is_some() {
+            let stash_root = crate::config::file_stash_root_path(&config)?;
+            ensure!(
+                stash_root.starts_with(paths.root()),
+                "backup of an externally configured File Stash root is unsupported; move file_stash.root under the Labby installation root before exporting"
+            );
+        }
         if let Some(auth) = config.auth {
             if let Some(path) = auth.sqlite_path {
                 values

@@ -28,7 +28,7 @@ pub(crate) mod secret_files;
 pub use env_writer::{EnvCredential, write_env_pairs, write_service_creds};
 #[cfg(test)]
 use paths::resolve_usage_telemetry_enabled;
-pub(crate) use paths::{access_db_path, home_dir};
+pub(crate) use paths::{access_db_path, file_stash_root_path, home_dir};
 pub use paths::{
     codemode_journal_db_path, codemode_journal_enabled, config_toml_path, dotenv_path,
     toml_candidates, usage_db_path, usage_telemetry_enabled, workspace_root_for_home,
@@ -386,6 +386,9 @@ pub struct LabConfig {
     /// Shared Labby workspace root for the optional filesystem browser.
     #[serde(default)]
     pub workspace: WorkspacePreferences,
+    /// Principal-scoped durable File Stash storage.
+    #[serde(default)]
+    pub file_stash: FileStashPreferences,
     /// OAuth callback relay preferences.
     #[serde(default)]
     pub oauth: OauthPreferences,
@@ -633,6 +636,7 @@ impl LabConfig {
             });
         }
         self.code_mode.validate()?;
+        self.file_stash.validate()?;
         self.proxy
             .validate()
             .map_err(|error| ConfigError::InvalidProxyConfig {
@@ -824,6 +828,7 @@ fn validate_protected_mcp_routes_for_startup(cfg: &LabConfig) -> Result<(), Conf
     let service_names: std::collections::HashSet<&str> = registry
         .services()
         .iter()
+        .filter(|service| registry.supports_context_free_dispatch(service.name))
         .map(|service| service.name)
         .collect();
     let loadout_names: std::collections::HashSet<&str> = cfg
@@ -1607,6 +1612,208 @@ pub struct WorkspacePreferences {
     pub root: Option<PathBuf>,
 }
 
+/// Durable storage preferences for the principal-scoped File Stash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileStashPreferences {
+    /// Dedicated metadata and blob root. Defaults to `~/.labby/file-stash`.
+    #[serde(default)]
+    pub root: Option<PathBuf>,
+    #[serde(default = "default_stash_file_bytes")]
+    pub max_file_bytes: u64,
+    #[serde(default = "default_stash_principal_bytes")]
+    pub principal_quota_bytes: u64,
+    #[serde(default = "default_stash_instance_bytes")]
+    pub instance_quota_bytes: u64,
+    #[serde(default = "default_stash_live_files")]
+    pub max_live_files_per_principal: u32,
+    #[serde(default = "default_stash_instance_live_files")]
+    pub max_live_files_per_instance: u32,
+    #[serde(default = "default_stash_page_size")]
+    pub page_size: u16,
+    #[serde(default = "default_stash_query_bytes")]
+    pub max_query_bytes: usize,
+    #[serde(default = "default_stash_header_bytes")]
+    pub max_header_bytes: usize,
+    #[serde(default = "default_stash_recipients")]
+    pub grant_recipients_page_size: u16,
+    #[serde(default = "default_stash_mcp_read_bytes")]
+    pub max_mcp_read_bytes: u64,
+    #[serde(default = "default_stash_queue_capacity")]
+    pub queue_capacity: usize,
+    #[serde(default = "default_stash_database_deadline_ms")]
+    pub database_deadline_ms: u64,
+    #[serde(default = "default_stash_principal_uploads")]
+    pub max_concurrent_uploads_per_principal: usize,
+    #[serde(default = "default_stash_instance_uploads")]
+    pub max_concurrent_uploads_per_instance: usize,
+    #[serde(default = "default_stash_downloads")]
+    pub max_concurrent_downloads: usize,
+    #[serde(default = "default_stash_mcp_reads")]
+    pub max_concurrent_mcp_reads: usize,
+    #[serde(default = "default_stash_idle_seconds")]
+    pub upload_idle_seconds: u64,
+    #[serde(default = "default_stash_total_seconds")]
+    pub upload_total_seconds: u64,
+    #[serde(default = "default_stash_idle_seconds")]
+    pub download_idle_seconds: u64,
+    #[serde(default = "default_stash_total_seconds")]
+    pub download_total_seconds: u64,
+    #[serde(default = "default_stash_pending_seconds")]
+    pub pending_ttl_seconds: u64,
+    #[serde(default = "default_stash_janitor_batch")]
+    pub janitor_batch_size: usize,
+    #[serde(default = "default_stash_janitor_backoff_seconds")]
+    pub janitor_backoff_max_seconds: u64,
+    #[serde(default = "default_stash_janitor_interval_seconds")]
+    pub janitor_interval_seconds: u64,
+}
+
+impl Default for FileStashPreferences {
+    fn default() -> Self {
+        Self {
+            root: None,
+            max_file_bytes: default_stash_file_bytes(),
+            principal_quota_bytes: default_stash_principal_bytes(),
+            instance_quota_bytes: default_stash_instance_bytes(),
+            max_live_files_per_principal: default_stash_live_files(),
+            max_live_files_per_instance: default_stash_instance_live_files(),
+            page_size: default_stash_page_size(),
+            max_query_bytes: default_stash_query_bytes(),
+            max_header_bytes: default_stash_header_bytes(),
+            grant_recipients_page_size: default_stash_recipients(),
+            max_mcp_read_bytes: default_stash_mcp_read_bytes(),
+            queue_capacity: default_stash_queue_capacity(),
+            database_deadline_ms: default_stash_database_deadline_ms(),
+            max_concurrent_uploads_per_principal: default_stash_principal_uploads(),
+            max_concurrent_uploads_per_instance: default_stash_instance_uploads(),
+            max_concurrent_downloads: default_stash_downloads(),
+            max_concurrent_mcp_reads: default_stash_mcp_reads(),
+            upload_idle_seconds: default_stash_idle_seconds(),
+            upload_total_seconds: default_stash_total_seconds(),
+            download_idle_seconds: default_stash_idle_seconds(),
+            download_total_seconds: default_stash_total_seconds(),
+            pending_ttl_seconds: default_stash_pending_seconds(),
+            janitor_batch_size: default_stash_janitor_batch(),
+            janitor_backoff_max_seconds: default_stash_janitor_backoff_seconds(),
+            janitor_interval_seconds: default_stash_janitor_interval_seconds(),
+        }
+    }
+}
+
+fn default_stash_file_bytes() -> u64 {
+    104_857_600
+}
+fn default_stash_principal_bytes() -> u64 {
+    1_073_741_824
+}
+fn default_stash_instance_bytes() -> u64 {
+    10_737_418_240
+}
+fn default_stash_live_files() -> u32 {
+    1_000
+}
+fn default_stash_instance_live_files() -> u32 {
+    100_000
+}
+fn default_stash_page_size() -> u16 {
+    50
+}
+fn default_stash_query_bytes() -> usize {
+    128
+}
+fn default_stash_header_bytes() -> usize {
+    16_384
+}
+fn default_stash_recipients() -> u16 {
+    50
+}
+fn default_stash_mcp_read_bytes() -> u64 {
+    10_485_760
+}
+fn default_stash_queue_capacity() -> usize {
+    64
+}
+fn default_stash_database_deadline_ms() -> u64 {
+    100
+}
+fn default_stash_principal_uploads() -> usize {
+    2
+}
+fn default_stash_instance_uploads() -> usize {
+    8
+}
+fn default_stash_downloads() -> usize {
+    16
+}
+fn default_stash_mcp_reads() -> usize {
+    4
+}
+fn default_stash_idle_seconds() -> u64 {
+    30
+}
+fn default_stash_total_seconds() -> u64 {
+    600
+}
+fn default_stash_pending_seconds() -> u64 {
+    1_800
+}
+const STASH_PENDING_MARGIN_SECONDS: u64 = 60;
+fn default_stash_janitor_batch() -> usize {
+    100
+}
+fn default_stash_janitor_backoff_seconds() -> u64 {
+    300
+}
+fn default_stash_janitor_interval_seconds() -> u64 {
+    60
+}
+
+impl FileStashPreferences {
+    fn validate(&self) -> Result<(), ConfigError> {
+        let valid = (1..=1_073_741_824).contains(&self.max_file_bytes)
+            && (self.max_file_bytes..=107_374_182_400).contains(&self.principal_quota_bytes)
+            && (self.principal_quota_bytes..=1_099_511_627_776)
+                .contains(&self.instance_quota_bytes)
+            && (1..=100_000).contains(&self.max_live_files_per_principal)
+            && (self.max_live_files_per_principal..=1_000_000)
+                .contains(&self.max_live_files_per_instance)
+            && (1..=200).contains(&self.page_size)
+            && (1..=1_024).contains(&self.max_query_bytes)
+            && (1..=65_536).contains(&self.max_header_bytes)
+            && (1..=200).contains(&self.grant_recipients_page_size)
+            && (1..=26_214_400).contains(&self.max_mcp_read_bytes)
+            && (1..=1_024).contains(&self.queue_capacity)
+            && (1..=30_000).contains(&self.database_deadline_ms)
+            && (1..=2).contains(&self.max_concurrent_uploads_per_principal)
+            && (self.max_concurrent_uploads_per_principal..=8)
+                .contains(&self.max_concurrent_uploads_per_instance)
+            && (1..=256).contains(&self.max_concurrent_downloads)
+            && (1..=4).contains(&self.max_concurrent_mcp_reads)
+            && (1..=30).contains(&self.upload_idle_seconds)
+            && (self.upload_idle_seconds..=600).contains(&self.upload_total_seconds)
+            && (1..=30).contains(&self.download_idle_seconds)
+            && (self.download_idle_seconds..=600).contains(&self.download_total_seconds)
+            && self.pending_ttl_seconds
+                >= self
+                    .upload_total_seconds
+                    .saturating_add(STASH_PENDING_MARGIN_SECONDS)
+            && self.pending_ttl_seconds <= 1_800
+            && (1..=100).contains(&self.janitor_batch_size)
+            && (1..=300).contains(&self.janitor_backoff_max_seconds)
+            && (1..=3_600).contains(&self.janitor_interval_seconds)
+            && self.janitor_backoff_max_seconds >= self.janitor_interval_seconds;
+        if !valid {
+            return Err(ConfigError::InvalidProxyConfig {
+                reason:
+                    "file_stash limits must be positive and within their documented safety bounds"
+                        .into(),
+            });
+        }
+        Ok(())
+    }
+}
+
 /// OAuth local relay preferences.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1749,6 +1956,7 @@ fn validate_top_level_extension_boundary(raw: &str) -> Result<()> {
         "api",
         "web",
         "workspace",
+        "file_stash",
         "oauth",
         "admin",
         "services",
@@ -3444,6 +3652,95 @@ mcp = true
             workspace_root_for_home(&cfg, home),
             home.join(".labby").join("workspace")
         );
+    }
+
+    #[test]
+    fn file_stash_defaults_are_bounded_and_invalid_limits_fail_startup_validation() {
+        let mut config = LabConfig::default();
+        assert_eq!(config.file_stash.max_file_bytes, 104_857_600);
+        assert_eq!(config.file_stash.principal_quota_bytes, 1_073_741_824);
+        assert_eq!(config.file_stash.instance_quota_bytes, 10_737_418_240);
+        assert_eq!(config.file_stash.max_live_files_per_instance, 100_000);
+        assert_eq!(config.file_stash.queue_capacity, 64);
+        assert_eq!(config.file_stash.max_concurrent_uploads_per_principal, 2);
+        assert_eq!(config.file_stash.max_concurrent_uploads_per_instance, 8);
+        assert_eq!(config.file_stash.max_concurrent_downloads, 16);
+        assert_eq!(config.file_stash.download_idle_seconds, 30);
+        assert_eq!(config.file_stash.download_total_seconds, 600);
+        assert!(config.validate().is_ok());
+        config.file_stash.queue_capacity = 0;
+        assert!(config.validate().is_err());
+        let mut config = LabConfig::default();
+        config.file_stash.pending_ttl_seconds = config.file_stash.upload_total_seconds;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn file_stash_rejects_every_resource_limit_outside_its_boundary() {
+        macro_rules! invalid {
+            ($field:ident, $value:expr) => {{
+                let mut config = LabConfig::default();
+                config.file_stash.$field = $value;
+                assert!(
+                    config.validate().is_err(),
+                    "{} accepted an invalid boundary value",
+                    stringify!($field)
+                );
+            }};
+        }
+        invalid!(max_file_bytes, 0);
+        invalid!(principal_quota_bytes, 0);
+        invalid!(instance_quota_bytes, 0);
+        invalid!(max_live_files_per_principal, 0);
+        invalid!(max_live_files_per_instance, 1);
+        invalid!(page_size, 0);
+        invalid!(max_query_bytes, 0);
+        invalid!(max_header_bytes, 0);
+        invalid!(grant_recipients_page_size, 0);
+        invalid!(max_mcp_read_bytes, 0);
+        invalid!(queue_capacity, 0);
+        invalid!(database_deadline_ms, 0);
+        invalid!(max_concurrent_uploads_per_principal, 0);
+        invalid!(max_concurrent_uploads_per_instance, 0);
+        invalid!(max_concurrent_downloads, 0);
+        invalid!(max_concurrent_mcp_reads, 0);
+        invalid!(upload_idle_seconds, 0);
+        invalid!(upload_total_seconds, 0);
+        invalid!(download_idle_seconds, 0);
+        invalid!(download_total_seconds, 0);
+        invalid!(pending_ttl_seconds, 0);
+        invalid!(janitor_batch_size, 0);
+        invalid!(janitor_backoff_max_seconds, 0);
+        invalid!(janitor_interval_seconds, 0);
+
+        invalid!(max_file_bytes, 1_073_741_825);
+        invalid!(principal_quota_bytes, 107_374_182_401);
+        invalid!(instance_quota_bytes, 1_099_511_627_777);
+        invalid!(max_live_files_per_principal, 100_001);
+        invalid!(max_live_files_per_instance, 1_000_001);
+        invalid!(page_size, 201);
+        invalid!(max_query_bytes, 1_025);
+        invalid!(max_header_bytes, 65_537);
+        invalid!(grant_recipients_page_size, 201);
+        invalid!(max_mcp_read_bytes, 26_214_401);
+        invalid!(queue_capacity, 1_025);
+        invalid!(database_deadline_ms, 30_001);
+        invalid!(max_concurrent_uploads_per_principal, 3);
+        invalid!(max_concurrent_uploads_per_instance, 9);
+        invalid!(max_concurrent_downloads, 257);
+        invalid!(max_concurrent_mcp_reads, 5);
+        invalid!(upload_idle_seconds, 31);
+        invalid!(upload_total_seconds, 601);
+        invalid!(download_idle_seconds, 31);
+        invalid!(download_total_seconds, 601);
+        invalid!(pending_ttl_seconds, 1_801);
+        invalid!(janitor_batch_size, 101);
+        invalid!(janitor_backoff_max_seconds, 301);
+        invalid!(janitor_interval_seconds, 3_601);
+
+        let mut config = LabConfig::default();
+        config.file_stash.janitor_backoff_max_seconds = 1;
+        assert!(config.validate().is_err());
     }
 
     #[test]

@@ -540,6 +540,7 @@ mod tests {
         LabMcpServer {
             registry: Arc::new(crate::registry::build_default_registry()),
             access_runtime: Arc::clone(&fixture.runtime),
+            file_stash_runtime: Arc::new(crate::file_stash::FileStashRuntime::blocked()),
             gateway_manager: Some(Arc::clone(&fixture.manager)),
             peers: Default::default(),
             code_mode_app_state: Default::default(),

@@ -344,6 +344,8 @@ pub struct LabMcpServer {
     /// decisions while constructing a request handler.
     #[allow(dead_code)] // Consumed by the next project-binding/enforcement wave.
     pub(crate) access_runtime: Arc<AccessRuntime>,
+    /// Process-owned File Stash runtime shared by every surface adapter.
+    pub(crate) file_stash_runtime: Arc<crate::file_stash::FileStashRuntime>,
     /// Shared gateway manager used to resolve the current live upstream pool.
     #[cfg(feature = "gateway")]
     pub gateway_manager: Option<Arc<GatewayManager>>,
@@ -1040,6 +1042,7 @@ mod tests {
         LabMcpServer {
             registry: std::sync::Arc::new(ToolRegistry::new()),
             access_runtime: std::sync::Arc::new(crate::access::AccessRuntime::blocked_unavailable()),
+            file_stash_runtime: std::sync::Arc::new(crate::file_stash::FileStashRuntime::blocked()),
             #[cfg(feature = "gateway")]
             gateway_manager: None,
             peers,

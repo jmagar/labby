@@ -371,7 +371,7 @@ async fn raw_mode_catalog_is_exact_and_builtin_help_executes_live() {
     assert_eq!(fingerprint.len(), 64);
     let advertised = runner.list_tool_names().await.expect("bounded tools/list");
     let all_services = expected_service_tools();
-    let expected = all_services
+    let mut expected = all_services
         .iter()
         .filter(|service| {
             !matches!(
@@ -381,6 +381,9 @@ async fn raw_mode_catalog_is_exact_and_builtin_help_executes_live() {
         })
         .cloned()
         .collect::<BTreeSet<_>>();
+    if !cfg!(target_os = "linux") {
+        expected.remove("stash");
+    }
     let advertised_services = advertised
         .intersection(&all_services)
         .cloned()
@@ -390,7 +393,7 @@ async fn raw_mode_catalog_is_exact_and_builtin_help_executes_live() {
         !advertised.contains("lab_admin"),
         "local-only tool leaked over HTTP MCP"
     );
-    for unexpected in ["acp", "deploy", "fleet", "marketplace", "registry", "stash"] {
+    for unexpected in ["acp", "deploy", "fleet", "marketplace", "registry"] {
         assert!(!advertised.contains(unexpected));
     }
     for service in expected {

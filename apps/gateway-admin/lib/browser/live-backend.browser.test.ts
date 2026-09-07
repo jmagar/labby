@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { appendFileSync } from 'node:fs'
+import { access, readFile, writeFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import { chromium, type Page } from 'playwright'
@@ -163,6 +164,102 @@ async function exerciseActionableImportFailure(page: Page) {
   await assert.doesNotReject(page.getByText(/import sources are not configured|source is not configured/i).waitFor({ state: 'visible', timeout: 10_000 }))
 }
 
+async function waitForFile(path: string, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (await access(path).then(() => true, () => false)) return
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  throw new Error(`timed out waiting for ${path}`)
+}
+
+async function exerciseStashThroughUi(page: Page, descriptor: Awaited<ReturnType<typeof readLiveDescriptor>>) {
+  assert.ok(descriptor)
+  let name = `browser-stash-${descriptor.run_id}.txt`
+  const contents = `live browser stash ${descriptor.run_id}\n`
+  await page.goto('/stash/', { waitUntil: 'domcontentloaded', timeout: 15_000 })
+  const dropTarget = page.getByRole('button', { name: /drop files here or browse/i })
+  await dropTarget.waitFor({ state: 'visible', timeout: 10_000 })
+  await dropTarget.focus()
+  assert.equal(await dropTarget.evaluate(element => element === document.activeElement), true)
+  const fileChooser = page.waitForEvent('filechooser')
+  const uploadRequest = page.waitForRequest(request => request.method() === 'POST' && new URL(request.url()).pathname === '/v1/stash/uploads')
+  await dropTarget.press('Enter')
+  await (await fileChooser).setFiles({ name, mimeType: 'text/plain', buffer: Buffer.from(contents) })
+  const observedUpload = await uploadRequest
+  assert.equal(observedUpload.headers()['content-length'], String(Buffer.byteLength(contents)))
+  assert.equal(observedUpload.postDataBuffer()?.equals(Buffer.from(contents)), true)
+  await page.getByRole('status').filter({ hasText: `${name} uploaded.` }).waitFor({ state: 'attached', timeout: 15_000 })
+  const row = page.getByRole('article').filter({ hasText: name })
+  await row.waitFor({ state: 'visible', timeout: 10_000 })
+  const uri = await row.getByTitle('Copy canonical URI').locator('code').innerText()
+  assert.match(uri, /^stash:\/\/me\/files\/[A-Z0-9]+$/)
+  await assert.doesNotReject(page.locator('[data-console-hero-stat="Files"] [data-console-hero-stat-value="1"]').getByText('1', { exact: true }).waitFor({ state: 'visible' }))
+  await assert.doesNotReject(page.getByText(`${Buffer.byteLength(contents)} B`, { exact: true }).first().waitFor({ state: 'visible' }))
+
+  const emptyName = `browser-stash-empty-${descriptor.run_id}.txt`
+  const emptyRequest = page.waitForRequest(request => request.method() === 'POST' && new URL(request.url()).pathname === '/v1/stash/uploads')
+  const emptyChooser = page.waitForEvent('filechooser')
+  await dropTarget.press('Enter')
+  await (await emptyChooser).setFiles({ name: emptyName, mimeType: 'text/plain', buffer: Buffer.alloc(0) })
+  const observedEmptyUpload = await emptyRequest
+  assert.equal(observedEmptyUpload.headers()['content-length'], '0')
+  assert.equal(observedEmptyUpload.postDataBuffer()?.length ?? 0, 0)
+  await page.getByRole('status').filter({ hasText: `${emptyName} uploaded.` }).waitFor({ state: 'attached', timeout: 15_000 })
+  const emptyRow = page.getByRole('article').filter({ hasText: emptyName })
+  await emptyRow.getByRole('button', { name: `Delete ${emptyName}` }).click()
+  await page.getByRole('alertdialog', { name: 'Delete this file?' }).getByRole('button', { name: 'Delete file' }).click()
+  await emptyRow.waitFor({ state: 'detached', timeout: 10_000 })
+
+  const download = page.waitForEvent('download')
+  await row.getByRole('link', { name: `Download ${name}` }).click()
+  assert.equal(await readFile(await (await download).path()!, 'utf8'), contents)
+
+  await row.getByRole('button', { name: `Rename or share ${name}` }).click()
+  const dialog = page.getByRole('dialog', { name: `Manage ${name}` })
+  await dialog.getByLabel('Filename').waitFor({ state: 'visible' })
+  assert.equal(await dialog.getByLabel('Filename').evaluate(element => element === document.activeElement), true)
+  const previousName = name
+  name = `browser-stash-renamed-${descriptor.run_id}.txt`
+  await dialog.getByLabel('Filename').fill(name)
+  const renameResponse = page.waitForResponse(response => response.request().method() === 'PATCH'
+    && new URL(response.url()).pathname.startsWith('/v1/stash/files/'))
+  await dialog.getByRole('button', { name: 'Rename', exact: true }).click()
+  assert.equal((await renameResponse).status(), 200)
+  await row.waitFor({ state: 'detached', timeout: 10_000 })
+  const renamed = page.getByRole('article').filter({ hasText: name })
+  await renamed.waitFor({ state: 'visible', timeout: 10_000 })
+  assert.equal(await renamed.getByTitle('Copy canonical URI').locator('code').innerText(), uri)
+  await assert.doesNotReject(page.getByText(previousName, { exact: true }).waitFor({ state: 'detached', timeout: 10_000 }))
+
+  await renamed.getByRole('button', { name: `Rename or share ${name}` }).click()
+  const shareDialog = page.getByRole('dialog', { name: `Manage ${name}` })
+  await shareDialog.getByLabel('Find a recipient').fill('Browser Stash')
+  await shareDialog.getByText('Browser Stash Recipient', { exact: true }).waitFor({ state: 'visible', timeout: 10_000 })
+  await shareDialog.getByRole('button', { name: 'Grant access' }).click()
+  await page.getByRole('status').filter({ hasText: 'Access granted' }).waitFor({ state: 'attached', timeout: 10_000 })
+
+  await writeFile(descriptor.restart_request_path, 'restart\n', { mode: 0o600, flag: 'wx' })
+  await waitForFile(descriptor.restart_complete_path)
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 15_000 })
+  const persisted = page.getByRole('article').filter({ hasText: name })
+  await persisted.waitFor({ state: 'visible', timeout: 10_000 })
+
+  await persisted.getByRole('button', { name: `Rename or share ${name}` }).click()
+  const persistedDialog = page.getByRole('dialog', { name: `Manage ${name}` })
+  const revoke = persistedDialog.getByRole('button', { name: 'Revoke' })
+  await revoke.waitFor({ state: 'visible', timeout: 10_000 })
+  await revoke.click()
+  await page.getByRole('status').filter({ hasText: 'Access revoked' }).waitFor({ state: 'attached', timeout: 10_000 })
+
+  const afterRevoke = page.getByRole('article').filter({ hasText: name })
+  await afterRevoke.getByRole('button', { name: `Delete ${name}` }).click()
+  const confirmation = page.getByRole('alertdialog', { name: 'Delete this file?' })
+  await confirmation.getByRole('button', { name: 'Delete file' }).click()
+  await page.getByRole('status').filter({ hasText: `${name} deleted.` }).waitFor({ state: 'attached', timeout: 10_000 })
+  await assert.doesNotReject(afterRevoke.waitFor({ state: 'detached', timeout: 10_000 }))
+}
+
 test('embedded Gateway Admin completes a real backend journey', {
   concurrency: false,
   skip: liveEnabled ? false : 'outer supervisor did not supply LABBY_LIVE_BROWSER_DESCRIPTOR',
@@ -180,6 +277,7 @@ test('embedded Gateway Admin completes a real backend journey', {
         baseURL: descriptor.base_url,
         storageState: descriptor.storage_state_path,
         viewport: { width: 1360, height: 900 },
+        reducedMotion: 'reduce',
       })
     await context.tracing.start({ screenshots: false, snapshots: false, sources: false })
     const page = await context.newPage()
@@ -247,6 +345,11 @@ test('embedded Gateway Admin completes a real backend journey', {
       progress('artifact-lifecycle-through-ui')
       await exerciseActionableImportFailure(page)
       progress('artifact-import-failure-through-ui')
+
+      if (descriptor.stash_supported) {
+        await exerciseStashThroughUi(page, descriptor)
+        progress('stash-lifecycle-reload-restart-through-ui')
+      }
 
       // A real rapid duplicate reaches backend serialization; the UI must not
       // turn it into two successful state transitions.

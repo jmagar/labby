@@ -27,6 +27,41 @@ mod store;
 mod test_support;
 mod workflow;
 
+/// Durable principal identity resolved from a live [`labby_auth::PrincipalLink`]
+/// by AccessStore. The private field prevents storage services from inventing
+/// identities from actor keys or presentation metadata.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct AccessPrincipalId(String);
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct FileStashRecipient {
+    pub(crate) principal_id: String,
+    pub(crate) display_name: String,
+}
+
+impl AccessPrincipalId {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Rehydrate an ID that was minted by this process for its private
+    /// in-process MCP peer. Network callers must never reach this constructor.
+    pub(crate) fn from_propagated(value: String) -> Option<Self> {
+        (!value.is_empty() && value.len() <= 255).then_some(Self(value))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+/// Keeps AccessStore mutation admission leased after a fresh active-principal
+/// read, so a grant commit can linearize ahead of recipient deactivation.
+pub(crate) struct ActiveFileStashPrincipalLease {
+    _guards: Vec<tokio::sync::OwnedRwLockReadGuard<()>>,
+}
+
 #[allow(unused_imports)]
 pub(crate) use authorization::{
     AuthorizeProjectInput, LibraryAccessSnapshot, ProjectPermissionSnapshot,
@@ -61,6 +96,8 @@ pub(crate) use loadout::{AssignProjectLoadoutInput, AssignProjectLoadoutOutcome}
 #[allow(unused_imports)]
 pub(crate) use read::{AccessibleProjectSnapshot, ProjectAccessSnapshot};
 pub(crate) use runtime::CredentialLifecycleError;
+#[allow(unused_imports)]
+pub(crate) use runtime::FileStashPrincipalResolutionError;
 #[allow(unused_imports)]
 pub(crate) use runtime::{
     AccessBlockedReason, AccessRuntime, AccessRuntimeError, AccessRuntimeStatus, AccessSetupReason,

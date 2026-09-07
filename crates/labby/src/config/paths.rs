@@ -57,6 +57,14 @@ pub fn workspace_root_path(config: &LabConfig) -> Result<PathBuf> {
     Ok(lab_home_dir()?.join("workspace"))
 }
 
+pub(crate) fn file_stash_root_path(config: &LabConfig) -> Result<PathBuf> {
+    if let Some(root) = config.file_stash.root.as_deref() {
+        let home = home_dir().ok_or_else(|| anyhow::anyhow!("HOME env var not set"))?;
+        return Ok(expand_home_path(root, &home));
+    }
+    Ok(lab_home_dir()?.join("file-stash"))
+}
+
 fn expand_home_path(path: &Path, home: &Path) -> PathBuf {
     let raw = path.as_os_str().to_string_lossy();
     if raw == "~" {

@@ -8,6 +8,7 @@ use labby_runtime::agent_error::AgentErrorContext;
 use crate::mcp::agent_error::invalid_params as invalid_params_agent_error;
 
 pub(crate) const MCP_LIST_PAGE_SIZE: usize = 100;
+pub(crate) const MCP_RETAINED_LIST_ITEM_CAP: usize = MCP_LIST_PAGE_SIZE + 1;
 
 static CATALOG_SNAPSHOT_REVISION: AtomicU64 = AtomicU64::new(1);
 

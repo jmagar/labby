@@ -940,6 +940,7 @@ mod tests {
         LabMcpServer {
             registry: Arc::new(build_default_registry()),
             access_runtime: Arc::new(crate::access::AccessRuntime::blocked_unavailable()),
+            file_stash_runtime: Arc::new(crate::file_stash::FileStashRuntime::blocked()),
             #[cfg(feature = "gateway")]
             gateway_manager: None,
             peers: Default::default(),

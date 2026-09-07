@@ -39,6 +39,10 @@ export type LiveBackendDescriptor = {
   csrf_state_path: string
   evidence_dir: string
   scan_secrets_path: string
+  restart_request_path: string
+  restart_complete_path: string
+  stash_supported: boolean
+  recipient_principal_id: string
   nightly?: boolean
 }
 
@@ -85,6 +89,14 @@ async function canonicalOwnedPath(root: string, value: unknown, field: string, k
   return canonical
 }
 
+async function canonicalOwnedFuturePath(root: string, value: unknown, field: string) {
+  const resolved = ownedAbsolutePath(value, field)
+  const parent = await realpath(path.dirname(resolved))
+  const canonical = path.join(parent, path.basename(resolved))
+  assert.ok(isStrictDescendant(root, canonical), `${field} must be below run root`)
+  return canonical
+}
+
 export async function readLiveDescriptor(): Promise<LiveBackendDescriptor | null> {
   const descriptorPath = process.env[LIVE_DESCRIPTOR_ENV]
   if (!descriptorPath) return null
@@ -124,6 +136,9 @@ export async function readLiveDescriptorAt(descriptorPath: string): Promise<Live
   const scanSecretsPath = await canonicalOwnedPath(runRoot, parsed.scan_secrets_path, 'scan_secrets_path', 'file')
   const scanSecretsStat = await stat(scanSecretsPath)
   assert.equal(scanSecretsStat.mode & 0o077, 0, 'scan secrets must be mode 0600')
+  const restartRequestPath = await canonicalOwnedFuturePath(runRoot, parsed.restart_request_path, 'restart_request_path')
+  const restartCompletePath = await canonicalOwnedFuturePath(runRoot, parsed.restart_complete_path, 'restart_complete_path')
+  assert.match(parsed.recipient_principal_id ?? '', /^[A-Za-z0-9_-]{8,128}$/)
   return {
     version: 1,
     run_id: parsed.run_id!,
@@ -133,6 +148,10 @@ export async function readLiveDescriptorAt(descriptorPath: string): Promise<Live
     csrf_state_path: csrfStatePath,
     evidence_dir: evidenceDir,
     scan_secrets_path: scanSecretsPath,
+    restart_request_path: restartRequestPath,
+    restart_complete_path: restartCompletePath,
+    stash_supported: parsed.stash_supported === true,
+    recipient_principal_id: parsed.recipient_principal_id!,
     nightly: parsed.nightly === true,
   }
 }

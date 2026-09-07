@@ -9,7 +9,7 @@ Feature invariant status: clean.
 | labby | `all` | AggregateDefault | false | false | - | `lab-admin`<br>`api-docs`<br>`gateway-host`<br>`fs`<br>`systemd`<br>`skills` |
 | labby | `api-docs` | HelperInternal | false | true | - | `dep:utoipa` |
 | labby | `default` | AggregateDefault | false | false | - | `gateway-host` |
-| labby | `fs` | ProductSlice | false | true | - | `dep:walkdir`<br>`dep:globset`<br>`dep:unicode-normalization` |
+| labby | `fs` | ProductSlice | false | true | - | `dep:walkdir`<br>`dep:globset` |
 | labby | `gateway` | ProductSlice | true | true | - | `dep:labby-codemode`<br>`dep:labby-gateway`<br>`dep:labby-openapi`<br>`web-ui`<br>`skills` |
 | labby | `gateway-host` | IntentionalException | true | true | - | `gateway` |
 | labby | `integrated-gateway` | IntentionalException | false | false | - | `gateway` |

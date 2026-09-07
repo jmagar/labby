@@ -2708,6 +2708,1481 @@
         ]
       }
     },
+    "/v1/stash": {
+      "get": {
+        "tags": [
+          "stash"
+        ],
+        "summary": "List or search File Stash files",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque page cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "description": "Page-local filename substring filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Caller-authorized file page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StashPageDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed File Stash request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File or grant was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Filename or grant conflicts with existing state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or request exceeds a configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File Stash validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "File Stash capacity is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "File Stash is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "stash"
+        ],
+        "summary": "Dispatch action to stash",
+        "description": "Execute an action on the stash service. Use `action: \"help\"` to list available actions. Actions whose schema reports `requires_admin: true` require the `lab:admin` scope. Every non-2xx response uses AgentErrorResponse; follow `recovery.guidance` and do not repeat requests unchanged when `side_effects` is `possible` or `unknown`.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StashActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful action response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown action or malformed request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing, invalid, or must be renewed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated caller lacks required scope or policy permission",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Requested service, action target, or upstream was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict, ambiguity, stale state, or restart required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request or generated content exceeds the configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation, confirmation, path-safety, or tool-execution error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit or queue saturation; honor recovery.retry_after_ms when present",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal failure requiring diagnostic inspection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream gateway, provider, OAuth-resource, or transport failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service or provider temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Operation timed out; use recovery guidance before retrying",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/stash/files/{file_id}": {
+      "get": {
+        "tags": [
+          "stash"
+        ],
+        "summary": "Read File Stash metadata",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StashFileDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed File Stash request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File or grant was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Filename or grant conflicts with existing state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or request exceeds a configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File Stash validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "File Stash capacity is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "File Stash is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "stash"
+        ],
+        "summary": "Delete an owned File Stash object",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "File deleted"
+          },
+          "400": {
+            "description": "Malformed File Stash request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File or grant was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Filename or grant conflicts with existing state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or request exceeds a configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File Stash validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "File Stash capacity is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "File Stash is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "stash"
+        ],
+        "summary": "Rename an owned File Stash object",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StashRenameRequestDoc"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Renamed file metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StashFileDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed File Stash request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File or grant was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Filename or grant conflicts with existing state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or request exceeds a configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File Stash validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "File Stash capacity is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "File Stash is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/stash/files/{file_id}/content": {
+      "get": {
+        "tags": [
+          "stash"
+        ],
+        "summary": "Download File Stash content",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Raw file bytes with private no-store and attachment headers",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed File Stash request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File or grant was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Filename or grant conflicts with existing state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or request exceeds a configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File Stash validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "File Stash capacity is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "File Stash is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/stash/files/{file_id}/grants": {
+      "get": {
+        "tags": [
+          "stash"
+        ],
+        "summary": "List active File Stash grants",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque grant page cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grant page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StashGrantPageDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed File Stash request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File or grant was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Filename or grant conflicts with existing state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or request exceeds a configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File Stash validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "File Stash capacity is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "File Stash is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "stash"
+        ],
+        "summary": "Grant read access to a File Stash object",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StashGrantRequestDoc"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created read grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StashGrantDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed File Stash request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File or grant was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Filename or grant conflicts with existing state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or request exceeds a configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File Stash validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "File Stash capacity is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "File Stash is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/stash/files/{file_id}/grants/{grant_id}": {
+      "delete": {
+        "tags": [
+          "stash"
+        ],
+        "summary": "Revoke a File Stash grant",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "grant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Grant revoked"
+          },
+          "400": {
+            "description": "Malformed File Stash request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File or grant was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Filename or grant conflicts with existing state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or request exceeds a configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File Stash validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "File Stash capacity is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "File Stash is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/stash/recipients": {
+      "post": {
+        "tags": [
+          "stash"
+        ],
+        "summary": "Search eligible grant recipients",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StashRecipientQueryDoc"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Recipient matches",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StashRecipientsDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed File Stash request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File or grant was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Filename or grant conflicts with existing state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or request exceeds a configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File Stash validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "File Stash capacity is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "File Stash is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/stash/stats": {
+      "get": {
+        "tags": [
+          "stash"
+        ],
+        "summary": "Read File Stash usage",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Owned-file usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StashStatsDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed File Stash request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File or grant was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Filename or grant conflicts with existing state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or request exceeds a configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File Stash validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "File Stash capacity is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "File Stash is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
+    "/v1/stash/uploads": {
+      "post": {
+        "tags": [
+          "stash"
+        ],
+        "summary": "Upload a File Stash object",
+        "parameters": [
+          {
+            "name": "Content-Length",
+            "in": "header",
+            "description": "Exact raw body length in bytes",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "X-Labby-Stash-Filename",
+            "in": "header",
+            "description": "Percent-encoded display filename",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "description": "Required for cookie-authenticated mutations",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created file identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StashUploadResponseDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed File Stash request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication is missing or invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "File or grant was not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Filename or grant conflicts with existing state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "File or request exceeds a configured limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "File Stash validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "File Stash capacity is busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "File Stash is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer_auth": []
+          }
+        ]
+      }
+    },
     "/v1/uploads": {
       "post": {
         "tags": [
@@ -6585,6 +8060,354 @@
             "type": "string"
           },
           "id": {
+            "type": "string"
+          }
+        }
+      },
+      "StashActionRequest": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "stash.list",
+              "stash.search",
+              "stash.stats",
+              "stash.metadata",
+              "stash.rename",
+              "stash.delete",
+              "stash.grants.create",
+              "stash.grants.list",
+              "stash.grants.revoke"
+            ]
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      },
+      "StashFileDoc": {
+        "type": "object",
+        "required": [
+          "file_id",
+          "uri",
+          "display_name",
+          "size_bytes",
+          "created_at",
+          "updated_at",
+          "owned"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "file_id": {
+            "type": "string"
+          },
+          "owned": {
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "updated_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "uri": {
+            "type": "string"
+          }
+        }
+      },
+      "StashGrantDoc": {
+        "type": "object",
+        "required": [
+          "grant_id",
+          "file_id",
+          "grantee_principal_id",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "file_id": {
+            "type": "string"
+          },
+          "grant_id": {
+            "type": "string"
+          },
+          "grantee_principal_id": {
+            "type": "string"
+          }
+        }
+      },
+      "StashGrantPageDoc": {
+        "type": "object",
+        "required": [
+          "grants"
+        ],
+        "properties": {
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StashGrantDoc"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "StashGrantRequestDoc": {
+        "type": "object",
+        "required": [
+          "grantee_principal_id"
+        ],
+        "properties": {
+          "grantee_principal_id": {
+            "type": "string"
+          }
+        }
+      },
+      "StashPageDoc": {
+        "type": "object",
+        "required": [
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StashFileDoc"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "StashRecipientDoc": {
+        "type": "object",
+        "required": [
+          "principal_id",
+          "display_name"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "principal_id": {
+            "type": "string"
+          }
+        }
+      },
+      "StashRecipientQueryDoc": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          }
+        }
+      },
+      "StashRecipientsDoc": {
+        "type": "object",
+        "required": [
+          "recipients"
+        ],
+        "properties": {
+          "recipients": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StashRecipientDoc"
+            }
+          }
+        }
+      },
+      "StashRenameRequestDoc": {
+        "type": "object",
+        "required": [
+          "display_name"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string"
+          }
+        }
+      },
+      "StashStashDeleteParams": {
+        "type": "object",
+        "required": [
+          "file_id"
+        ],
+        "properties": {
+          "file_id": {
+            "type": "string"
+          }
+        }
+      },
+      "StashStashGrantsCreateParams": {
+        "type": "object",
+        "required": [
+          "file_id",
+          "grantee_principal_id"
+        ],
+        "properties": {
+          "file_id": {
+            "type": "string"
+          },
+          "grantee_principal_id": {
+            "type": "string"
+          }
+        }
+      },
+      "StashStashGrantsListParams": {
+        "type": "object",
+        "required": [
+          "file_id"
+        ],
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "file_id": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        }
+      },
+      "StashStashGrantsRevokeParams": {
+        "type": "object",
+        "required": [
+          "file_id",
+          "grant_id"
+        ],
+        "properties": {
+          "file_id": {
+            "type": "string"
+          },
+          "grant_id": {
+            "type": "string"
+          }
+        }
+      },
+      "StashStashListParams": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        }
+      },
+      "StashStashMetadataParams": {
+        "type": "object",
+        "required": [
+          "file_id"
+        ],
+        "properties": {
+          "file_id": {
+            "type": "string"
+          }
+        }
+      },
+      "StashStashRenameParams": {
+        "type": "object",
+        "required": [
+          "file_id",
+          "display_name"
+        ],
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "file_id": {
+            "type": "string"
+          }
+        }
+      },
+      "StashStashSearchParams": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "query": {
+            "type": "string"
+          }
+        }
+      },
+      "StashStatsDoc": {
+        "type": "object",
+        "required": [
+          "owned_file_count",
+          "owned_shared_file_count",
+          "owned_committed_bytes",
+          "owned_reserved_bytes"
+        ],
+        "properties": {
+          "owned_committed_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "owned_file_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "owned_reserved_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "owned_shared_file_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "StashUploadResponseDoc": {
+        "type": "object",
+        "required": [
+          "file_id",
+          "uri"
+        ],
+        "properties": {
+          "file_id": {
+            "type": "string"
+          },
+          "uri": {
             "type": "string"
           }
         }

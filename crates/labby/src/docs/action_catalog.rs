@@ -156,6 +156,25 @@ const WEB_ACTION_CLIENT_SOURCES: &[&str] = &[
     include_str!("../../../../apps/gateway-admin/lib/fs/client.ts"),
 ];
 
+/// Stash uses dedicated REST routes instead of the generic action endpoint.
+/// Keep this list aligned with `apps/gateway-admin/lib/stash/client.ts`; only
+/// registered actions that the web client invokes through those routes belong
+/// here.
+const STASH_WEB_ACTION_BINDINGS: &[(&str, &str)] = &[
+    ("stash", "stash.delete"),
+    ("stash", "stash.grants.create"),
+    ("stash", "stash.grants.list"),
+    ("stash", "stash.grants.revoke"),
+    ("stash", "stash.list"),
+    ("stash", "stash.rename"),
+    ("stash", "stash.search"),
+    ("stash", "stash.stats"),
+];
+
+#[cfg(test)]
+const STASH_WEB_CLIENT_SOURCE: &str =
+    include_str!("../../../../apps/gateway-admin/lib/stash/client.ts");
+
 #[cfg(test)]
 const CLI_DISPATCH_SOURCES: &[&str] = &[
     include_str!("../cli/doctor.rs"),
@@ -253,7 +272,8 @@ fn action_surfaces(
 }
 
 fn web_action_bound(service: &str, action: &str) -> bool {
-    binding_literal_exists(WEB_ACTION_CLIENT_SOURCES, action)
+    STASH_WEB_ACTION_BINDINGS.contains(&(service, action))
+        || binding_literal_exists(WEB_ACTION_CLIENT_SOURCES, action)
         || (service == "fs"
             && action == "fs.preview"
             && WEB_ACTION_CLIENT_SOURCES.iter().any(|source| {
@@ -344,6 +364,37 @@ mod tests {
                 .all(|(service, action)| web_action_bound(service, action))
         );
         assert!(!projected.is_empty());
+    }
+
+    #[test]
+    fn stash_web_catalog_matches_direct_route_client() {
+        let registry = crate::registry::build_docs_registry();
+        let actions = build_action_catalog(registry.services());
+        let projected = actions
+            .iter()
+            .filter(|action| action.service == "stash" && action.surface_availability.web_ui)
+            .map(|action| (action.service.as_str(), action.action.as_str()))
+            .collect::<BTreeSet<_>>();
+        let expected = STASH_WEB_ACTION_BINDINGS
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(projected, expected);
+        for route_fragment in [
+            "request(`/?${query}`",
+            "request('/stats'",
+            "method: 'PATCH'",
+            "method: 'DELETE'",
+            "/grants?${query}`",
+            "/grants`,",
+            "/grants/${encodeURIComponent(grantId)}`",
+        ] {
+            assert!(
+                STASH_WEB_CLIENT_SOURCE.contains(route_fragment),
+                "stash web client no longer contains direct route binding {route_fragment}"
+            );
+        }
     }
 }
 

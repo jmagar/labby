@@ -84,6 +84,7 @@ impl IntoResponse for ApiError {
             "auth_failed" => StatusCode::UNAUTHORIZED,
             "not_found" | "route_not_found" => StatusCode::NOT_FOUND,
             "rate_limited" | "queue_saturated" => StatusCode::TOO_MANY_REQUESTS,
+            "busy" => StatusCode::TOO_MANY_REQUESTS,
             "sync_in_progress"
             | "service_unavailable"
             | "provider_unavailable"
@@ -99,6 +100,7 @@ impl IntoResponse for ApiError {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
             "content_too_large" | "response_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
+            "quota_exceeded" => StatusCode::PAYLOAD_TOO_LARGE,
             "not_supported" => StatusCode::NOT_IMPLEMENTED,
             "install_timeout"
             | "timeout"
@@ -179,6 +181,16 @@ mod tests {
         assert_eq!(contextual["kind"], "missing_param");
         assert_eq!(contextual["service"], "gateway");
         assert_eq!(contextual["action"], "gateway.list");
+    }
+
+    #[test]
+    fn file_stash_capacity_errors_have_stable_http_statuses() {
+        assert_eq!(status_for("busy"), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(status_for("quota_exceeded"), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            status_for("service_unavailable"),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
     }
 
     #[test]

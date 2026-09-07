@@ -245,7 +245,7 @@ fn feature_shape_intent_is_explicit_without_the_live_harness() {
 
 #[test]
 fn independently_defined_feature_shapes_match_intent_projections() {
-    let base = BTreeSet::from(["doctor", "server_logs", "setup"]);
+    let base = BTreeSet::from(["doctor", "server_logs", "setup", "stash"]);
     let gateway = BTreeSet::from([
         "artifacts",
         "browser",
@@ -257,6 +257,7 @@ fn independently_defined_feature_shapes_match_intent_projections() {
         "setup",
         "snippets",
         "sources",
+        "stash",
         "uploads",
     ]);
     let shapes = BTreeMap::from([
@@ -267,7 +268,7 @@ fn independently_defined_feature_shapes_match_intent_projections() {
         ("gateway-host", gateway),
         (
             "fs",
-            BTreeSet::from(["doctor", "fs", "server_logs", "setup"]),
+            BTreeSet::from(["doctor", "fs", "server_logs", "setup", "stash"]),
         ),
         (
             "skills",
@@ -279,12 +280,13 @@ fn independently_defined_feature_shapes_match_intent_projections() {
                 "server_logs",
                 "setup",
                 "sources",
+                "stash",
                 "uploads",
             ]),
         ),
         (
             "lab-admin",
-            BTreeSet::from(["doctor", "lab_admin", "server_logs", "setup"]),
+            BTreeSet::from(["doctor", "lab_admin", "server_logs", "setup", "stash"]),
         ),
         (
             "all",
@@ -301,6 +303,7 @@ fn independently_defined_feature_shapes_match_intent_projections() {
                 "jobs",
                 "snippets",
                 "sources",
+                "stash",
                 "uploads",
             ]),
         ),
@@ -372,7 +375,7 @@ fn security_invariants_are_independent_of_execution_intent() {
         (
             (false, true),
             Invariant {
-                allowed: false,
+                allowed: true,
                 minimum: EvidenceLevel::LiveStateTransition,
             },
         ),
@@ -461,8 +464,8 @@ fn security_invariants_are_independent_of_execution_intent() {
     }
     assert_eq!(
         observed_combinations,
-        BTreeSet::from([(false, false), (true, false), (true, true)]),
-        "all allowed admin x destructive combinations must remain covered; false/true is forbidden"
+        BTreeSet::from([(false, false), (false, true), (true, false), (true, true)]),
+        "all allowed admin x destructive combinations must remain covered"
     );
     let preview = catalog
         .iter()
@@ -527,15 +530,7 @@ fn security_invariants_are_independent_of_execution_intent() {
 
 #[test]
 fn retired_products_are_absent_from_authoritative_projections() {
-    let retired = [
-        "acp",
-        "deploy",
-        "fleet",
-        "marketplace",
-        "nodes",
-        "registry",
-        "stash",
-    ];
+    let retired = ["acp", "deploy", "fleet", "marketplace", "nodes", "registry"];
     for action in catalog() {
         assert!(
             !retired.contains(&action.service.as_str()),
@@ -609,7 +604,7 @@ fn retired_products_are_absent_from_authoritative_projections() {
         .as_array()
         .expect("generated MCP help must contain services");
     let web_nav = include_str!("../../../apps/gateway-admin/components/console/nav-model.ts");
-    for name in retired.into_iter().filter(|name| *name != "stash") {
+    for name in retired {
         assert!(
             !cli_help.contains(&format!("## `labby {name}")),
             "retired CLI command returned: {name}"
@@ -629,15 +624,7 @@ fn retired_products_are_absent_from_authoritative_projections() {
 
 #[test]
 fn retired_services_are_rejected_as_configured_gateway_subset_targets() {
-    for service in [
-        "acp",
-        "deploy",
-        "fleet",
-        "marketplace",
-        "nodes",
-        "registry",
-        "stash",
-    ] {
+    for service in ["acp", "deploy", "fleet", "marketplace", "nodes", "registry"] {
         let source = format!(
             r#"
 [[protected_mcp_routes]]
@@ -660,6 +647,26 @@ services = ["{service}"]
             "{service}: unexpected config rejection: {error}"
         );
     }
+}
+
+#[test]
+fn caller_bound_stash_is_rejected_as_a_context_free_gateway_subset_target() {
+    let source = r#"
+[[protected_mcp_routes]]
+name = "caller-bound"
+enabled = true
+public_host = "mcp.example.test"
+public_path = "/caller-bound"
+
+[protected_mcp_routes.target]
+kind = "gateway_subset"
+services = ["stash"]
+"#;
+    let config: labby::config::LabConfig = toml::from_str(source).expect("config syntax");
+    let error = config
+        .validate()
+        .expect_err("caller-bound service must not be accepted by context-free gateway dispatch");
+    assert!(error.to_string().contains("unknown gateway_subset service"));
 }
 
 #[test]

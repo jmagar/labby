@@ -19,8 +19,6 @@ forbidden_paths=(
   crates/labby-apis/src/device_runtime
   crates/labby-apis/src/deploy.rs
   crates/labby-apis/src/deploy
-  crates/labby-apis/src/stash.rs
-  crates/labby-apis/src/stash
   apps/gateway-admin/components/registry
   apps/gateway-admin/lib/api/mcpregistry-client.ts
   apps/gateway-admin/lib/hooks/use-registry.ts
@@ -51,7 +49,9 @@ active_roots=(
   docker-compose.prod.yml
 )
 
-forbidden_pattern='pub mod (acp|acp_registry|mcpregistry|marketplace|device_runtime|deploy|stash)|feature = "(acp_registry|mcpregistry|marketplace|deploy)"|labby_apis::(acp|acp_registry|mcpregistry|marketplace|device_runtime|deploy|stash)|mcpregistry.url|ACP_SESSION_CWD|NodeRuntimeRole|DevicePreferences|ResolvedDeviceRuntime|/v1/(acp|stash|marketplace|nodes|fleet)|/dev/api/marketplace|marketplaceActionUrl|nodeDetailUrl|nodeLogsSearchUrl'
+forbidden_pattern='pub mod (acp|acp_registry|mcpregistry|marketplace|device_runtime|deploy)|feature = "(acp_registry|mcpregistry|marketplace|deploy|stash)"|labby_apis::(acp|acp_registry|mcpregistry|marketplace|device_runtime|deploy)|mcpregistry.url|ACP_SESSION_CWD|NodeRuntimeRole|DevicePreferences|ResolvedDeviceRuntime|Stash(Component|Revision|Origin|Provider|Target)|marketplace-stash|/v1/(acp|marketplace|nodes|fleet)|/dev/api/marketplace|marketplaceActionUrl|nodeDetailUrl|nodeLogsSearchUrl'
+retired_stash_action_pattern='"(components\.list|component\.(get|create|import|workspace|save|revisions|export|deploy)|provider\.(link|push|pull)|target\.(add|remove))"'
+colliding_stash_action_pattern='"(providers\.list|targets\.list)"'
 
 # Portable POSIX grep, not ripgrep: this guard runs in the lightweight `changes`
 # CI job, which installs no extra tooling. A missing `rg` previously made the
@@ -90,6 +90,55 @@ case "$grep_status" in
     ;;
 esac
 
+# The old Agent Artifact Manager action vocabulary must never reappear in
+# executable product code. Documentation may name it only to explain retirement.
+set +e
+grep -rEn --binary-files=without-match \
+  --exclude-dir=.git \
+  --exclude-dir=target \
+  --exclude-dir=node_modules \
+  --exclude='check-retired-features.sh' \
+  -- "$retired_stash_action_pattern" crates apps plugins
+stash_action_status=$?
+set -e
+
+case "$stash_action_status" in
+  0)
+    printf 'retired-feature guard: retired Agent Artifact Manager action found\n' >&2
+    failed=1
+    ;;
+  1) ;;
+  *)
+    printf 'retired-feature guard: retired action scan failed (grep exit %s)\n' "$stash_action_status" >&2
+    failed=1
+    ;;
+esac
+
+# `providers.list` is also a legitimate Depot action. Permit its one canonical
+# definition while rejecting either plural legacy Stash action everywhere else.
+set +e
+grep -rEn --binary-files=without-match \
+  --exclude-dir=.git \
+  --exclude-dir=target \
+  --exclude-dir=node_modules \
+  --exclude='check-retired-features.sh' \
+  -- "$colliding_stash_action_pattern" crates apps plugins \
+  | grep -vE '^crates/labby/src/dispatch/depot/operations\.rs:'
+colliding_action_status=$?
+set -e
+
+case "$colliding_action_status" in
+  0)
+    printf 'retired-feature guard: colliding retired Stash action found outside its explicit allowlist\n' >&2
+    failed=1
+    ;;
+  1) ;;
+  *)
+    printf 'retired-feature guard: colliding action scan failed (grep exit %s)\n' "$colliding_action_status" >&2
+    failed=1
+    ;;
+esac
+
 require_present() {
   local pattern="$1" file="$2" message="$3"
   if [[ ! -f "$file" ]]; then
@@ -118,6 +167,28 @@ require_absent 'auth-method:' .github/workflows/mcp-registry.yml 'MCP Registry c
 require_present 'MCP_PRIVATE_KEY:.*secrets\.MCP_PRIVATE_KEY' .github/workflows/mcp-registry.yml 'MCP Registry publication must pass the DNS signing key to the shared workflow'
 require_absent 'mcp-publisher|registry\.modelcontextprotocol\.io|MCP_REGISTRY_DOMAIN' .github/workflows/release.yml 'release.yml must not duplicate the shared MCP Registry publisher'
 require_absent 'tootie\.tv' .github/workflows/mcp-registry.yml 'MCP Registry publication must not use the homelab tootie.tv domain'
+require_present 'principal-scoped arbitrary' docs/services/STASH.md \
+  'File Stash contract must remain limited to principal-scoped arbitrary files'
+require_present 'stash://me/files/\{opaque_file_id\}' docs/services/STASH.md \
+  'File Stash contract must preserve its opaque canonical resource URI'
+require_present 'no components, revisions, workspaces' docs/services/STASH.md \
+  'File Stash contract must explicitly exclude retired Agent Artifact Manager semantics'
+require_present 'owned_shared_file_count' docs/services/STASH.md \
+  'File Stash contract must define the shared summary statistic'
+require_present 'AccessStore `PrincipalId`' docs/services/STASH.md \
+  'File Stash contract must use the durable AccessStore principal identity'
+require_present 'commit `pending` metadata' docs/services/STASH.md \
+  'File Stash contract must retain its pending publication state'
+require_present 'commit metadata as `committed`' docs/services/STASH.md \
+  'File Stash contract must retain its committed publication state'
+require_present 'Delete is destructive' docs/services/STASH.md \
+  'File Stash contract must classify deletion as destructive'
+require_present 'grant creation mutate state but are not destructive' docs/services/STASH.md \
+  'File Stash contract must classify upload and grant creation as non-destructive mutations'
+require_present '`invalid_param`, `not_found`, `conflict`, `quota_exceeded`, `busy`' docs/services/STASH.md \
+  'File Stash contract must preserve stable error-kind names'
+require_present 'RFC 5987 `filename\*`' docs/services/STASH.md \
+  'File Stash contract must preserve safe download filename framing'
 
 if (( failed != 0 )); then
   exit 1

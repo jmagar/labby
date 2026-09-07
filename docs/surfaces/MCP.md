@@ -274,8 +274,15 @@ one.
 ## Supported Product Boundary
 
 The MCP server does not expose ACP, Marketplace, Registry-browser, Fleet/node,
-Deploy-product, or Stash tools. Historical contracts are preserved only under
-[../archive/retired-labby](../archive/retired-labby/).
+Deploy-product, or old Agent Artifact Manager tools. Historical contracts are
+preserved only under [../archive/retired-labby](../archive/retired-labby/).
+
+On Linux, File Stash uses the ordinary one-tool service shape for
+bounded metadata operations and exposes authorized file reads as
+`stash://me/files/{opaque_file_id}` resources.
+The URI is a stable object identity, not a filesystem path or filename. See
+[STASH.md](../services/STASH.md) for the authorization, size, and error contract.
+Unsupported platforms omit the service and its resources from MCP discovery.
 
 ## Agent Skills (SEP-2640)
 

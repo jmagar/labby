@@ -35,6 +35,9 @@ pub struct ServiceCatalog {
     /// Filter on `status == "available"` to find services that are callable.
     /// `"stub"` means compiled-in but not yet dispatching real actions.
     pub status: String,
+    /// Whether invocation requires a transport-resolved caller identity.
+    #[serde(default)]
+    pub caller_bound: bool,
     /// True when the service requires an authenticated HTTP request context and
     /// therefore must be hidden from stdio catalogs.
     #[serde(default)]
@@ -94,6 +97,8 @@ pub fn build_catalog(registry: &ToolRegistry) -> Catalog {
             description: svc.description.to_string(),
             category: svc.category.to_string(),
             status: svc.status.to_string(),
+            caller_bound: registry.dispatch_capability(svc.name)
+                == Some(crate::registry::DispatchCapability::CallerBound),
             requires_http_subject: false,
             actions: svc
                 .actions
@@ -153,6 +158,7 @@ mod tests {
                 description: "OAuth protected upstream".to_string(),
                 category: "Gateway".to_string(),
                 status: "available".to_string(),
+                caller_bound: false,
                 requires_http_subject: true,
                 actions: vec![ActionEntry {
                     name: "tool.call".to_string(),

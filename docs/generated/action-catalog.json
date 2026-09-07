@@ -6856,6 +6856,337 @@
     "builtin": false
   },
   {
+    "service": "stash",
+    "action": "help",
+    "description": "Show service actions",
+    "destructive": false,
+    "requires_admin": false,
+    "required_scopes": [],
+    "params": [],
+    "returns": "HelpPayload",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": true
+  },
+  {
+    "service": "stash",
+    "action": "schema",
+    "description": "Show the schema for a specific action",
+    "destructive": false,
+    "requires_admin": false,
+    "required_scopes": [],
+    "params": [
+      {
+        "name": "action",
+        "ty": "string",
+        "required": true,
+        "description": "Action name to describe"
+      }
+    ],
+    "returns": "ActionSpec",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": true
+  },
+  {
+    "service": "stash",
+    "action": "stash.delete",
+    "description": "Permanently delete an owned file",
+    "destructive": true,
+    "requires_admin": false,
+    "required_scopes": [],
+    "params": [
+      {
+        "name": "file_id",
+        "ty": "string",
+        "required": true,
+        "description": "Opaque immutable file ID"
+      }
+    ],
+    "returns": "Deleted",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "stash",
+    "action": "stash.grants.create",
+    "description": "Grant one principal read access to an owned file",
+    "destructive": false,
+    "requires_admin": false,
+    "required_scopes": [],
+    "params": [
+      {
+        "name": "file_id",
+        "ty": "string",
+        "required": true,
+        "description": "Opaque immutable file ID"
+      },
+      {
+        "name": "grantee_principal_id",
+        "ty": "string",
+        "required": true,
+        "description": "AccessStore-resolved durable PrincipalId"
+      }
+    ],
+    "returns": "StashGrant",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "stash",
+    "action": "stash.grants.list",
+    "description": "List active grants for an owned file",
+    "destructive": false,
+    "requires_admin": false,
+    "required_scopes": [],
+    "params": [
+      {
+        "name": "file_id",
+        "ty": "string",
+        "required": true,
+        "description": "Opaque immutable file ID"
+      },
+      {
+        "name": "cursor",
+        "ty": "string",
+        "required": false,
+        "description": "Opaque continuation cursor"
+      },
+      {
+        "name": "limit",
+        "ty": "integer",
+        "required": false,
+        "description": "Page size from 1 to the configured maximum"
+      }
+    ],
+    "returns": "GrantPage",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "stash",
+    "action": "stash.grants.revoke",
+    "description": "Revoke an active grant on an owned file",
+    "destructive": false,
+    "requires_admin": false,
+    "required_scopes": [],
+    "params": [
+      {
+        "name": "file_id",
+        "ty": "string",
+        "required": true,
+        "description": "Opaque immutable file ID"
+      },
+      {
+        "name": "grant_id",
+        "ty": "string",
+        "required": true,
+        "description": "Opaque grant ID"
+      }
+    ],
+    "returns": "Revoked",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "stash",
+    "action": "stash.list",
+    "description": "List files available to the caller",
+    "destructive": false,
+    "requires_admin": false,
+    "required_scopes": [],
+    "params": [
+      {
+        "name": "cursor",
+        "ty": "string",
+        "required": false,
+        "description": "Opaque continuation cursor"
+      },
+      {
+        "name": "limit",
+        "ty": "integer",
+        "required": false,
+        "description": "Page size from 1 to the configured maximum"
+      }
+    ],
+    "returns": "FilePage",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "stash",
+    "action": "stash.metadata",
+    "description": "Read metadata for an available file",
+    "destructive": false,
+    "requires_admin": false,
+    "required_scopes": [],
+    "params": [
+      {
+        "name": "file_id",
+        "ty": "string",
+        "required": true,
+        "description": "Opaque immutable file ID"
+      }
+    ],
+    "returns": "StashFile",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": false
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "stash",
+    "action": "stash.rename",
+    "description": "Rename an owned file",
+    "destructive": false,
+    "requires_admin": false,
+    "required_scopes": [],
+    "params": [
+      {
+        "name": "file_id",
+        "ty": "string",
+        "required": true,
+        "description": "Opaque immutable file ID"
+      },
+      {
+        "name": "display_name",
+        "ty": "string",
+        "required": true,
+        "description": "New display filename"
+      }
+    ],
+    "returns": "StashFile",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "stash",
+    "action": "stash.search",
+    "description": "Search available files by display name",
+    "destructive": false,
+    "requires_admin": false,
+    "required_scopes": [],
+    "params": [
+      {
+        "name": "query",
+        "ty": "string",
+        "required": true,
+        "description": "Case-insensitive display-name substring"
+      },
+      {
+        "name": "cursor",
+        "ty": "string",
+        "required": false,
+        "description": "Opaque continuation cursor"
+      },
+      {
+        "name": "limit",
+        "ty": "integer",
+        "required": false,
+        "description": "Page size from 1 to the configured maximum"
+      }
+    ],
+    "returns": "FilePage",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
+    "service": "stash",
+    "action": "stash.stats",
+    "description": "Read authoritative owned-file usage",
+    "destructive": false,
+    "requires_admin": false,
+    "required_scopes": [],
+    "params": [],
+    "returns": "StashStats",
+    "surface_availability": {
+      "cli": false,
+      "mcp": true,
+      "api": true,
+      "web_ui": true
+    },
+    "requires_http_subject": false,
+    "auth_posture": "uses the selected transport auth and gateway visibility policy",
+    "inventory_scope": "global_inventory_not_active_runtime_exposure",
+    "builtin": false
+  },
+  {
     "service": "uploads",
     "action": "help",
     "description": "Show service actions",

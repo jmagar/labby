@@ -77,6 +77,11 @@ pub struct PropagatedCallerAuth {
     /// JWT `sub`, when the caller had one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sub: Option<String>,
+    /// AccessStore-resolved durable principal ID. This is minted only by the
+    /// outer Labby process for its private in-process peer; remote `_meta`
+    /// remains untrusted and this field is never honored on network routes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_principal_id: Option<String>,
     /// Opaque, host-minted capability for the private in-process hop.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub private_context_token: Option<String>,
@@ -90,6 +95,7 @@ impl PropagatedCallerAuth {
             trusted_local: true,
             scopes: Vec::new(),
             sub: None,
+            access_principal_id: None,
             private_context_token: None,
         }
     }
@@ -101,6 +107,7 @@ impl PropagatedCallerAuth {
             trusted_local: false,
             scopes,
             sub,
+            access_principal_id: None,
             private_context_token: None,
         }
     }
@@ -108,6 +115,12 @@ impl PropagatedCallerAuth {
     #[must_use]
     pub fn with_private_context_token(mut self, token: String) -> Self {
         self.private_context_token = Some(token);
+        self
+    }
+
+    #[must_use]
+    pub fn with_access_principal_id(mut self, principal_id: String) -> Self {
+        self.access_principal_id = Some(principal_id);
         self
     }
 

@@ -706,6 +706,7 @@ mod tests {
         LabMcpServer {
             registry: Arc::new(crate::registry::build_default_registry()),
             access_runtime: runtime,
+            file_stash_runtime: Arc::new(crate::file_stash::FileStashRuntime::blocked()),
             gateway_manager: Some(manager),
             peers: Default::default(),
             code_mode_app_state: Default::default(),
@@ -767,6 +768,7 @@ mod tests {
         let server = LabMcpServer {
             registry: Arc::new(registry),
             access_runtime: Arc::new(AccessRuntime::blocked_unavailable()),
+            file_stash_runtime: Arc::new(crate::file_stash::FileStashRuntime::blocked()),
             gateway_manager: None,
             peers: Default::default(),
             code_mode_app_state: Default::default(),

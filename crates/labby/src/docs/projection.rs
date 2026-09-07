@@ -125,7 +125,7 @@ fn sdk_only_feature(meta: &PluginMeta) -> Option<String> {
 fn service_doc(service: &RegisteredService, feature_matrix: &FeatureMatrix) -> ServiceDoc {
     let meta = meta_for(service.name);
     let feature = service_feature(service.name, feature_matrix);
-    let exposure = if service.name == "lab_admin" {
+    let exposure = if matches!(service.name, "lab_admin" | "stash") {
         ServiceExposure::RuntimeConditional
     } else if feature.is_some() {
         ServiceExposure::FeatureGated
@@ -803,12 +803,20 @@ fn service_feature(service: &str, matrix: &FeatureMatrix) -> Option<String> {
 
 pub(super) fn service_surfaces(service: &str) -> SurfaceAvailability {
     SurfaceAvailability {
-        cli: service != "fs",
+        cli: !matches!(service, "fs" | "stash"),
         mcp: true,
         api: service != "lab_admin",
         web_ui: matches!(
             service,
-            "gateway" | "setup" | "fs" | "artifacts" | "sources" | "jobs" | "uploads" | "bundles"
+            "gateway"
+                | "setup"
+                | "fs"
+                | "artifacts"
+                | "sources"
+                | "jobs"
+                | "uploads"
+                | "bundles"
+                | "stash"
         ),
     }
 }
@@ -878,6 +886,25 @@ pub fn workspace_root() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stash_service_projection_matches_current_adapters_and_platform_boundary() {
+        let projection = build_docs_projection(&workspace_root().unwrap()).unwrap();
+        let stash = projection
+            .service_catalog
+            .iter()
+            .find(|service| service.name == "stash")
+            .expect("stash service inventory");
+
+        assert!(!stash.surfaces.cli);
+        assert!(stash.surfaces.mcp);
+        assert!(stash.surfaces.api);
+        assert!(stash.surfaces.web_ui);
+        assert!(matches!(
+            stash.exposure,
+            ServiceExposure::RuntimeConditional
+        ));
+    }
 
     #[test]
     fn secret_examples_are_always_placeholdered() {

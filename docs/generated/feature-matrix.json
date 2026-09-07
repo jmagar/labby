@@ -46,8 +46,7 @@
       "feature": "fs",
       "dependencies": [
         "dep:walkdir",
-        "dep:globset",
-        "dep:unicode-normalization"
+        "dep:globset"
       ],
       "included_in_default": false,
       "included_in_all": true,

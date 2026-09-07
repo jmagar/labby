@@ -106,6 +106,7 @@ pub struct AppState {
     /// The default is a conservative, non-I/O unavailable runtime. Server
     /// startup replaces it after resolving and observing the configured store.
     pub(crate) access_runtime: Arc<crate::access::AccessRuntime>,
+    pub(crate) file_stash_runtime: Arc<crate::file_stash::FileStashRuntime>,
     /// Daemon-owned proof lifecycle orchestration. `None` fails closed and
     /// keeps the local bootstrap routes unavailable until startup wires L6.
     pub(crate) access_bootstrap_proof:
@@ -190,6 +191,7 @@ impl AppState {
             bearer_token: None,
             http_bind_host: None,
             access_runtime: Arc::new(crate::access::AccessRuntime::blocked_unavailable()),
+            file_stash_runtime: Arc::new(crate::file_stash::FileStashRuntime::blocked()),
             access_bootstrap_proof: None,
             access_credential_adapter: None,
             #[cfg(feature = "skills")]
@@ -214,6 +216,15 @@ impl AppState {
         runtime: Arc<crate::access::AccessRuntime>,
     ) -> Self {
         self.access_runtime = runtime;
+        self
+    }
+
+    #[must_use]
+    pub(crate) fn with_file_stash_runtime(
+        mut self,
+        runtime: Arc<crate::file_stash::FileStashRuntime>,
+    ) -> Self {
+        self.file_stash_runtime = runtime;
         self
     }
 

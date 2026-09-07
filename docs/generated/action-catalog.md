@@ -214,6 +214,17 @@ This is a global inventory, not the active runtime exposure or authorization pol
 | `sources` | `sources.delete` | false | false | true | lab:admin | `connection_id: string`<br>`id*: string` | `DeleteReceipt` | mcp, api |
 | `sources` | `sources.list` | false | false | false |  | `connection_id: string` | `Source[]` | mcp, api, web |
 | `sources` | `sources.refresh` | false | false | true | lab:admin | `connection_id: string`<br>`id*: string` | `SourceRefreshReceipt` | mcp, api, web |
+| `stash` | `help` | true | false | false |  |  | `HelpPayload` | mcp, api |
+| `stash` | `schema` | true | false | false |  | `action*: string` | `ActionSpec` | mcp, api |
+| `stash` | `stash.delete` | false | true | false |  | `file_id*: string` | `Deleted` | mcp, api, web |
+| `stash` | `stash.grants.create` | false | false | false |  | `file_id*: string`<br>`grantee_principal_id*: string` | `StashGrant` | mcp, api, web |
+| `stash` | `stash.grants.list` | false | false | false |  | `file_id*: string`<br>`cursor: string`<br>`limit: integer` | `GrantPage` | mcp, api, web |
+| `stash` | `stash.grants.revoke` | false | false | false |  | `file_id*: string`<br>`grant_id*: string` | `Revoked` | mcp, api, web |
+| `stash` | `stash.list` | false | false | false |  | `cursor: string`<br>`limit: integer` | `FilePage` | mcp, api, web |
+| `stash` | `stash.metadata` | false | false | false |  | `file_id*: string` | `StashFile` | mcp, api |
+| `stash` | `stash.rename` | false | false | false |  | `file_id*: string`<br>`display_name*: string` | `StashFile` | mcp, api, web |
+| `stash` | `stash.search` | false | false | false |  | `query*: string`<br>`cursor: string`<br>`limit: integer` | `FilePage` | mcp, api, web |
+| `stash` | `stash.stats` | false | false | false |  |  | `StashStats` | mcp, api, web |
 | `uploads` | `help` | true | false | false |  |  | `HelpPayload` | mcp, api |
 | `uploads` | `schema` | true | false | false |  | `action*: string` | `ActionSpec` | mcp, api |
 | `uploads` | `uploads.create` | false | false | true | lab:admin | `connection_id: string`<br>`filename*: string` | `Upload` | mcp, api, web |

@@ -537,6 +537,7 @@ mod tests {
             description: format!("{name} service"),
             category: "Test".to_string(),
             status: "available".to_string(),
+            caller_bound: false,
             requires_http_subject: false,
             actions: vec![ActionEntry {
                 name: "health.list".to_string(),

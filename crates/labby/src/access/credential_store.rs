@@ -298,7 +298,8 @@ impl AccessStore {
             { return Err(AccessStoreError::NotAuthorized); }
             ensure_pristine(&transaction)?;
             transaction.execute("INSERT INTO organizations(organization_id,name,status,policy_epoch,created_at,updated_at) VALUES(?1,?2,'active',0,?3,?3)", params![ORGANIZATION_ID,input.organization_name,input.now]).map_err(map_sqlite_error)?;
-            transaction.execute("INSERT INTO principals(principal_id,organization_id,kind,status,display_name,created_at,updated_at) VALUES(?1,?2,'user','active',NULL,?3,?3)", params![PRINCIPAL_ID,ORGANIZATION_ID,input.now]).map_err(map_sqlite_error)?;
+            let owner_label = format!("{} owner", input.organization_name.trim());
+            transaction.execute("INSERT INTO principals(principal_id,organization_id,kind,status,display_name,created_at,updated_at) VALUES(?1,?2,'user','active',?3,?4,?4)", params![PRINCIPAL_ID,ORGANIZATION_ID,owner_label,input.now]).map_err(map_sqlite_error)?;
             transaction.execute("INSERT INTO principal_links(link_id,principal_id,link_kind,issuer,subject,credential_id,status,verification_generation,link_generation,created_at,updated_at) VALUES(?1,?2,'external',?3,?4,NULL,'active',1,1,?5,?5)", params![LINK_ID,PRINCIPAL_ID,input.canonical_issuer,input.subject,input.now]).map_err(map_sqlite_error)?;
             transaction.execute("INSERT INTO projects(project_id,organization_id,name,status,project_policy_epoch,created_at,updated_at) VALUES(?1,?2,?3,'active',0,?4,?4)", params![PROJECT_ID,ORGANIZATION_ID,input.project_name,input.now]).map_err(map_sqlite_error)?;
             transaction.execute("INSERT INTO project_memberships(membership_id,organization_id,project_id,principal_id,role,status,created_by,created_at,updated_at) VALUES(?1,?2,?3,?4,'owner','active',?4,?5,?5)", params![MEMBERSHIP_ID,ORGANIZATION_ID,PROJECT_ID,PRINCIPAL_ID,input.now]).map_err(map_sqlite_error)?;

@@ -40,6 +40,8 @@ pub mod dispatch;
 pub mod docs;
 pub mod durable_state;
 mod entrypoint;
+#[allow(dead_code)]
+pub(crate) mod file_stash;
 pub mod installation;
 pub(crate) mod integration_identity;
 #[cfg(feature = "gateway")]
@@ -66,6 +68,8 @@ pub(crate) mod skills;
 mod stdio_sandbox;
 #[cfg(test)]
 pub mod test_support;
+#[doc(hidden)]
+pub mod testkit;
 #[cfg(unix)]
 pub(crate) mod unix_listener;
 #[cfg(feature = "fs")]

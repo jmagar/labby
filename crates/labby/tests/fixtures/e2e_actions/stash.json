@@ -1,0 +1,25 @@
+{
+  "service": "stash",
+  "api_path": "/v1/stash",
+  "cli_probe": null,
+  "can_mutate": true,
+  "success_action": "stash.list",
+  "invalid_action": "schema",
+  "policy_action": "stash.delete",
+  "workflow": [
+    "stash.rename",
+    "stash.grants.create",
+    "stash.grants.list",
+    "stash.grants.revoke",
+    "stash.delete"
+  ],
+  "parameters": {
+    "action": "stash.list",
+    "query": "matrix",
+    "file_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "display_name": "matrix-renamed.txt",
+    "grantee_principal_id": "matrix-stash-recipient",
+    "grant_id": "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+  },
+  "action_params": {}
+}

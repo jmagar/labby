@@ -8,9 +8,9 @@ Use [docs/README.md](docs/README.md) as the product-documentation index. Generat
 
 ## Current Product Shape
 
-The current registered services are `artifacts`, `bundles`, `doctor`, `fs`, `gateway`, `jobs`, `lab_admin`, `server_logs`, `setup`, `snippets`, `sources`, and `uploads`. The direct stdio MCP proxy is a CLI product surface backed by the gateway runtime.
+The current registered services are `artifacts`, `bundles`, `doctor`, `fs`, `gateway`, `jobs`, `lab_admin`, `server_logs`, `setup`, `snippets`, `sources`, and `uploads`. On Linux, the current registry also exposes principal-scoped `stash`; unsupported platforms omit it because the required descriptor-relative filesystem primitives are unavailable. The direct stdio MCP proxy is a CLI product surface backed by the gateway runtime.
 
-ACP chat, standalone Marketplace/MCP Registry products, Fleet/device runtime, Deploy-product, Stash, and their old CLI/API surfaces are retired and deleted. Provider-backed Artifact discovery may project bounded ACP, Marketplace, and MCP Registry results through the `artifacts` control-plane service; that does not restore the retired standalone products.
+ACP chat, standalone Marketplace/MCP Registry products, Fleet/device runtime, Deploy-product, and the old Agent Artifact Manager named Stash are retired and deleted. The new File Stash does not restore components, revisions, workspaces, providers, deploy targets, Marketplace forks, or drift detection. Provider-backed Artifact discovery may project bounded ACP, Marketplace, and MCP Registry results through the `artifacts` control-plane service; that does not restore the retired standalone products.
 
 The current CLI surface is generated in `docs/generated/cli-help.md`. Do not hand-maintain command inventories here.
 

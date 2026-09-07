@@ -415,6 +415,10 @@ async function descriptorFixture() {
     csrf_state_path: csrfState,
     evidence_dir: evidenceDir,
     scan_secrets_path: scanSecrets,
+    restart_request_path: path.join(runRoot, 'restart.request'),
+    restart_complete_path: path.join(runRoot, 'restart.complete'),
+    stash_supported: true,
+    recipient_principal_id: 'browser-stash-recipient',
   }
   await privateFile(descriptorPath, JSON.stringify(descriptor))
   return { parent, runRoot, evidenceDir, descriptorPath, descriptor }
